@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>작업 내역 — UE5 계정 서버 통신 클라이언트</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #656d76;
+    --border: #d0d7de;
+    --accent: #0969da;
+    --code-bg: #f6f8fa;
+    --table-head: #f6f8fa;
+    --ok: #1a7f37;
+    --pending: #9a6700;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --border: #30363d;
+      --accent: #4493f8;
+      --code-bg: #161b22;
+      --table-head: #161b22;
+      --ok: #3fb950;
+      --pending: #d29922;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    line-height: 1.65;
+    font-size: 16px;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+  h2 {
+    font-size: 1.35rem;
+    margin: 2.2rem 0 .8rem;
+    padding-bottom: .35rem;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
+  .date { color: var(--muted); margin: 0 0 1.5rem; font-size: .95rem; }
+  p { margin: .6rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    background: var(--code-bg);
+    border-radius: 6px;
+    padding: .15em .4em;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: .88em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+  th, td { border: 1px solid var(--border); padding: .5rem .7rem; text-align: left; }
+  th { background: var(--table-head); font-weight: 600; }
+  ul { padding-left: 1.4rem; }
+  li { margin: .3rem 0; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .pending { color: var(--pending); font-weight: 600; }
+  .badge {
+    display: inline-block;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: .1em .7em;
+    font-size: .85em;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>작업 내역 — UE5 계정 서버 통신 클라이언트</h1>
+  <p class="date">작성일: 2026-07-15</p>
+
+  <h2>개요</h2>
+  <p>언리얼 엔진 5.7 클라이언트(<code>UEClient_20260715</code>)에서 계정 백엔드 서버(FastAPI + MySQL)와
+     REST(JSON)로 통신하는 <strong>C++ 클라이언트</strong>를 구현했다.
+     회원가입 · 로그인 · 내 정보 조회 · 회원탈퇴 4개 기능을 제공한다.</p>
+  <p>기존 프로젝트는 블루프린트 전용(Source 없음)이었으며, 이번 작업으로 <strong>C++ 프로젝트로 전환</strong>했다.</p>
+
+  <h2>확정된 설계 결정</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>항목</th><th>결정</th></tr></thead>
+    <tbody>
+      <tr><td>구현 방식</td><td>C++ (언리얼 HTTP 모듈)</td></tr>
+      <tr><td>아키텍처</td><td><code>UGameInstanceSubsystem</code> 단일 클래스 (A안)</td></tr>
+      <tr><td>호출 방식</td><td><code>BlueprintCallable</code> 함수 + 콘솔 명령어 (둘 다)</td></tr>
+      <tr><td>토큰 보관</td><td>JWT 메모리 보관 (재시작 시 소멸)</td></tr>
+      <tr><td>서버 주소</td><td>기본 <code>http://127.0.0.1:8000</code> (<code>SetBaseUrl</code>로 변경)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>서버 계약 <span class="badge">서버 소스에서 직접 확인</span></h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>API</th><th>요청 본문</th><th>성공 응답</th><th>실패</th></tr></thead>
+    <tbody>
+      <tr><td>POST <code>/auth/register</code></td><td>email, nickname(2~50), password(8~128)</td><td>201 (id, email, nickname, created_at)</td><td>409 / 422 <code>detail</code></td></tr>
+      <tr><td>POST <code>/auth/login</code></td><td>email, password</td><td>200 (access_token, token_type)</td><td>401 <code>detail</code></td></tr>
+      <tr><td>GET <code>/auth/me</code></td><td>(Bearer)</td><td>200 (id, email, nickname, created_at)</td><td>401</td></tr>
+      <tr><td>DELETE <code>/auth/withdraw</code></td><td>(Bearer)</td><td>204 (본문 없음)</td><td>401</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul>
+    <li>인증: <code>Authorization: Bearer &lt;access_token&gt;</code> (JWT, HS256)</li>
+    <li>에러 본문: FastAPI 표준 <code>{"detail": "..."}</code> (문자열) / 422는 <code>{"detail": [{"msg": ...}]}</code> (배열)</li>
+  </ul>
+
+  <h2>구현 결과</h2>
+
+  <h3>데이터 구조 / 델리게이트</h3>
+  <ul>
+    <li><code>FAccountUser</code> (USTRUCT, BlueprintType) — Id, Email, Nickname, CreatedAt</li>
+    <li><code>FAccountSimpleResult(bool, int32, FString)</code> — 로그인 / 탈퇴</li>
+    <li><code>FAccountUserResult(bool, int32, FString, FAccountUser)</code> — 회원가입 / 내 정보</li>
+  </ul>
+
+  <h3>UAccountSubsystem (UGameInstanceSubsystem)</h3>
+  <ul>
+    <li>상태: <code>BaseUrl</code>, <code>AuthToken</code>(메모리)</li>
+    <li><code>UFUNCTION(BlueprintCallable)</code>: Register / Login / GetMe / Withdraw / SetBaseUrl</li>
+    <li><code>BlueprintAssignable</code> 델리게이트 4개: OnRegisterCompleted / OnLoginCompleted / OnMeCompleted / OnWithdrawCompleted</li>
+    <li>Me/Withdraw는 토큰 없으면 요청 없이 즉시 실패 처리</li>
+  </ul>
+
+  <h3>콘솔 명령어</h3>
+  <pre><code>Account.Register &lt;email&gt; &lt;nickname&gt; &lt;password&gt;
+Account.Login &lt;email&gt; &lt;password&gt;
+Account.Me
+Account.Withdraw
+Account.SetBaseUrl &lt;url&gt;</code></pre>
+  <p>결과는 델리게이트 구독으로 <code>UE_LOG</code> 자동 출력 (콘솔·BP 어디서 호출하든).</p>
+
+  <h3>에러 처리</h3>
+  <ul>
+    <li>연결 실패 → <code>bSuccess=false, StatusCode=0, "서버에 연결할 수 없습니다."</code></li>
+    <li>2xx → 성공 / 비2xx → <code>detail</code> 파싱 (문자열 그대로 / 422 배열은 첫 <code>msg</code>)</li>
+    <li>인증 필요 API인데 토큰 없음 → 요청 없이 <code>"로그인이 필요합니다."</code></li>
+    <li>204(withdraw)는 본문 파싱 없이 성공 처리</li>
+  </ul>
+
+  <h3>프로젝트 구조</h3>
+  <pre><code>Source/
+  UEClient_20260715.Target.cs          # 게임 타깃 (DefaultBuildSettings V6)
+  UEClient_20260715Editor.Target.cs    # 에디터 타깃 (V6)
+  UEClient_20260715/
+    UEClient_20260715.Build.cs         # 의존성: Core, CoreUObject, Engine, HTTP, Json
+    UEClient_20260715.h / .cpp         # IMPLEMENT_PRIMARY_GAME_MODULE
+    AccountSubsystem.h / .cpp          # 통신 클라이언트 (핵심)
+UEClient_20260715.uproject             # "Modules" 항목 추가
+docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
+작업내역.md / 작업내역.html            # 본 문서</code></pre>
+
+  <h2>검증 상태</h2>
+  <ul>
+    <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
+      <ul>
+        <li>UHT 처리 후 모듈 컴파일 → <code>UnrealEditor-UEClient_20260715.dll</code> 생성 확인</li>
+        <li>최초 <code>BuildSettingsVersion.V5</code> → 설치 엔진(V6)과 빌드 환경 충돌 → <strong>V6로 수정</strong> 후 성공</li>
+      </ul>
+    </li>
+    <li><span class="pending">⏳ 엔드투엔드(실서버 통신)는 미실행</span> — 에디터 GUI + 서버 기동 필요. 아래 절차로 확인.</li>
+  </ul>
+
+  <h2>엔드투엔드 테스트 방법</h2>
+  <pre><code># 1) 서버 기동 (C:/work/VibeCoding, MySQL game_account DB 켜진 상태)
+uvicorn app.main:app --reload
+
+# 2) UE 에디터에서 UEClient_20260715.uproject 열기 (재빌드 프롬프트 수락)
+
+# 3) Play(PIE) 후 콘솔(백틱 ` 키)에서 순서대로:
+Account.Register test@a.com 홍길동 password123
+Account.Login test@a.com password123
+Account.Me
+Account.Withdraw
+Account.Login test@a.com password123      # 탈퇴 후 → 401 기대</code></pre>
+  <p>기대 동작: 가입 201 → 중복 409 → 로그인 → 내 정보 → 탈퇴 204 → 재로그인 401.
+     결과는 Output Log 창에 <code>[Account] ...</code>로 출력.</p>
+
+  <h2>남은/추후 작업 <span class="badge">범위 밖</span></h2>
+  <ul>
+    <li>로그인 UI/위젯 (BP에서 델리게이트 바인딩으로 연결)</li>
+    <li>토큰 디스크 영속화(자동 로그인), refresh 토큰</li>
+    <li>비밀번호 재설정, 소셜 로그인</li>
+    <li>엔드투엔드 실서버 통신 검증 (위 절차대로 수동 실행)</li>
+  </ul>
+</main>
+</body>
+</html>

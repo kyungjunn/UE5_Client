@@ -1,0 +1,21 @@
+# Unreal Engine 빌드/캐시 산출물 (소스에서 재생성됨)
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Visual Studio / Rider
+.vs/
+.vsconfig
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
