@@ -166,22 +166,58 @@ Account.SetBaseUrl &lt;url&gt;</code></pre>
   UEClient_20260715.Target.cs          # 게임 타깃 (DefaultBuildSettings V6)
   UEClient_20260715Editor.Target.cs    # 에디터 타깃 (V6)
   UEClient_20260715/
-    UEClient_20260715.Build.cs         # 의존성: Core, CoreUObject, Engine, HTTP, Json
+    UEClient_20260715.Build.cs         # 의존성: Core, CoreUObject, Engine, UMG, HTTP, Json, Slate, SlateCore
     UEClient_20260715.h / .cpp         # IMPLEMENT_PRIMARY_GAME_MODULE
     AccountSubsystem.h / .cpp          # 통신 클라이언트 (핵심)
+    AuthUserWidgetBase.h / .cpp        # 로그인/가입 위젯 공통 베이스
+    LoginUserWidget.h / .cpp           # 로그인 위젯
+    RegisterUserWidget.h / .cpp        # 회원가입 위젯
 UEClient_20260715.uproject             # "Modules" 항목 추가
 docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
 작업내역.md / 작업내역.html            # 본 문서</code></pre>
+
+  <h2>2차 작업: 로그인 / 회원가입 UserWidget 연동 (C++ 베이스)</h2>
+  <p><code>UAccountSubsystem</code>을 호출하고 결과를 UI에 반영하는 UserWidget C++ 베이스 클래스를 추가했다.</p>
+  <ul>
+    <li><code>UAuthUserWidgetBase</code> (UUserWidget, Abstract) — 공통 베이스
+      <ul>
+        <li><code>StatusText</code> (BindWidgetOptional) 상태 메시지 출력</li>
+        <li><code>GetAccountSubsystem()</code>, <code>SetStatus(Message, bIsError)</code> (성공 초록 / 실패 빨강)</li>
+      </ul>
+    </li>
+    <li><code>ULoginUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>PasswordInput</code>, <code>LoginButton</code>
+      / BlueprintImplementableEvent <code>OnLoginFinished(bSuccess, Message)</code></li>
+    <li><code>URegisterUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code>, <code>RegisterButton</code>
+      / BlueprintImplementableEvent <code>OnRegisterFinished(bSuccess, Message)</code></li>
+  </ul>
+  <p>동작: 버튼 클릭 → 입력값 공백 검사 → 버튼 비활성화 + "처리 중..." → 서브시스템 호출 →
+     완료 델리게이트 수신 → 버튼 재활성화 → <code>StatusText</code> 반영 → <code>On...Finished</code> BP 이벤트 호출.
+     구독은 <code>NativeConstruct</code>, 해제는 <code>NativeDestruct</code>. Build.cs에 <code>UMG</code>·<code>Slate</code>·<code>SlateCore</code> 추가.</p>
+
+  <h3>블루프린트 연동</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>위젯 BP</th><th>배치할 위젯 (이름 정확히)</th><th>타입</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2">Login</td><td><code>EmailInput</code>, <code>PasswordInput</code></td><td>Editable Text Box</td></tr>
+      <tr><td><code>LoginButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
+      <tr><td rowspan="2">Register</td><td><code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code></td><td>Editable Text Box</td></tr>
+      <tr><td><code>RegisterButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>성공 후 화면 전환 등은 <code>On Login Finished</code> / <code>On Register Finished</code> 이벤트에 연결.</p>
 
   <h2>검증 상태</h2>
   <ul>
     <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
       <ul>
-        <li>UHT 처리 후 모듈 컴파일 → <code>UnrealEditor-UEClient_20260715.dll</code> 생성 확인</li>
+        <li>1차: 모듈 컴파일 → <code>UnrealEditor-UEClient_20260715.dll</code> 생성 확인</li>
         <li>최초 <code>BuildSettingsVersion.V5</code> → 설치 엔진(V6)과 빌드 환경 충돌 → <strong>V6로 수정</strong> 후 성공</li>
+        <li>2차: 위젯 클래스 3종 UHT 처리 + 컴파일·링크 성공 (에디터 종료 후 빌드)</li>
       </ul>
     </li>
-    <li><span class="pending">⏳ 엔드투엔드(실서버 통신)는 미실행</span> — 에디터 GUI + 서버 기동 필요. 아래 절차로 확인.</li>
+    <li><span class="pending">⏳ 엔드투엔드(실서버 통신 / BP 위젯 클릭)는 미실행</span> — 에디터 GUI + 서버 기동 필요. 아래 절차로 확인.</li>
   </ul>
 
   <h2>엔드투엔드 테스트 방법</h2>
