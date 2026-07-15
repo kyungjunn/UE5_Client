@@ -1,8 +1,10 @@
 #include "LoginUserWidget.h"
 
 #include "AccountSubsystem.h"
+#include "UEClientGameInstance.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Button.h"
+#include "Kismet/GameplayStatics.h"
 
 void ULoginUserWidget::NativeConstruct()
 {
@@ -19,6 +21,7 @@ void ULoginUserWidget::NativeConstruct()
 	if (UAccountSubsystem* Account = GetAccountSubsystem())
 	{
 		Account->OnLoginCompleted.AddDynamic(this, &ULoginUserWidget::HandleLoginCompleted);
+		Account->OnMeCompleted.AddDynamic(this, &ULoginUserWidget::HandleMeCompleted);
 	}
 }
 
@@ -35,6 +38,7 @@ void ULoginUserWidget::NativeDestruct()
 	if (UAccountSubsystem* Account = GetAccountSubsystem())
 	{
 		Account->OnLoginCompleted.RemoveDynamic(this, &ULoginUserWidget::HandleLoginCompleted);
+		Account->OnMeCompleted.RemoveDynamic(this, &ULoginUserWidget::HandleMeCompleted);
 	}
 
 	Super::NativeDestruct();
@@ -68,12 +72,46 @@ void ULoginUserWidget::HandleLoginClicked()
 
 void ULoginUserWidget::HandleLoginCompleted(bool bSuccess, int32 StatusCode, const FString& Message)
 {
+	SetStatus(Message, !bSuccess);
+	OnLoginFinished(bSuccess, Message);
+
+	if (!bSuccess)
+	{
+		if (LoginButton)
+		{
+			LoginButton->SetIsEnabled(true);
+		}
+		return;
+	}
+
+	// 로그인 성공 → 닉네임을 받아오기 위해 내 정보 조회. 버튼은 계속 비활성.
+	SetStatus(TEXT("프로필 불러오는 중..."), false);
+	if (UAccountSubsystem* Account = GetAccountSubsystem())
+	{
+		Account->GetMe();
+	}
+}
+
+void ULoginUserWidget::HandleMeCompleted(bool bSuccess, int32 StatusCode, const FString& Message, const FAccountUser& User)
+{
 	if (LoginButton)
 	{
 		LoginButton->SetIsEnabled(true);
 	}
-	SetStatus(Message, !bSuccess);
-	OnLoginFinished(bSuccess, Message);
+
+	if (!bSuccess)
+	{
+		SetStatus(Message, true);
+		return;
+	}
+
+	// 닉네임을 GameInstance에 저장 → Room 맵의 PlayerController가 읽어간다.
+	if (UUEClientGameInstance* GI = Cast<UUEClientGameInstance>(GetGameInstance()))
+	{
+		GI->SetPlayerNickname(User.Nickname);
+	}
+
+	UGameplayStatics::OpenLevel(this, LobbyLevelName);
 }
 
 void ULoginUserWidget::HandleSignupClicked()

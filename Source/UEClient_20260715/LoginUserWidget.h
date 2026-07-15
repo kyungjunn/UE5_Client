@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AuthUserWidgetBase.h"
+#include "AccountSubsystem.h"
 #include "LoginUserWidget.generated.h"
 
 class UEditableTextBox;
@@ -37,6 +38,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Account")
 	TSubclassOf<UUserWidget> RegisterWidgetClass;
 
+	/** 로그인 성공 후 이동할 Lobby 레벨 이름 (기본 Lobby). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Account")
+	FName LobbyLevelName = TEXT("Lobby");
+
 	/** 로그인 완료 시 호출. 화면 전환 등은 BP에서 처리. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Account")
 	void OnLoginFinished(bool bSuccess, const FString& Message);
@@ -50,4 +55,8 @@ private:
 
 	UFUNCTION()
 	void HandleLoginCompleted(bool bSuccess, int32 StatusCode, const FString& Message);
+
+	/** 로그인 성공 후 GetMe 결과. 닉네임을 GameInstance에 저장하고 Lobby로 이동. */
+	UFUNCTION()
+	void HandleMeCompleted(bool bSuccess, int32 StatusCode, const FString& Message, const FAccountUser& User);
 };

@@ -212,16 +212,90 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
   <p><code>WBP_Login</code>의 Class Defaults → Account → <code>Register Widget Class</code>에 <code>WBP_Register</code> 지정.
      성공 후 화면 전환 등은 <code>On Login Finished</code> / <code>On Register Finished</code> 이벤트에 연결.</p>
 
+  <h2>3차 작업: Lobby / 세션(방) 시스템</h2>
+  <p>로그인 성공 후 <strong>Lobby 레벨</strong>로 이동해 프로필(닉네임)을 보여주고,
+     언리얼 <strong>OnlineSubsystem(NULL/LAN)</strong> 세션으로 <strong>방 생성 / 방 참가</strong>를 구현했다.</p>
+
+  <h3>확정 설계</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>항목</th><th>결정</th></tr></thead>
+    <tbody>
+      <tr><td>OnlineSubsystem</td><td>NULL (LAN) — 리슨 서버 모델</td></tr>
+      <tr><td>레벨 구조</td><td>Lobby(브라우저) 맵 + Room(실제 방) 맵 분리</td></tr>
+      <tr><td>프로필 표시</td><td>닉네임만 (로그인 후 <code>GetMe</code>로 취득)</td></tr>
+      <tr><td>닉네임 보관</td><td>커스텀 <code>UGameInstance</code>에 캐시</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>레벨 흐름</h3>
+  <pre><code>[Login] --로그인 성공(GetMe)--> [Lobby (standalone): 프로필 + 방만들기 + RoomList]
+  방 만들기 → CreateSession(max 4) → ServerTravel("Room?listen")
+  방 참가   → JoinSession → ClientTravel → [Room (listen server)]
+[Room] LobbyGameMode/PC/PlayerState → 접속자 닉네임 목록 / 나가기 → Lobby 복귀</code></pre>
+
+  <h3>추가/수정 클래스</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>클래스</th><th>역할</th></tr></thead>
+    <tbody>
+      <tr><td><code>UUEClientGameInstance</code></td><td>로그인 닉네임 캐시 (레벨 이동해도 유지)</td></tr>
+      <tr><td><code>UGameSessionSubsystem</code></td><td>세션 래핑: <code>HostRoom</code>/<code>FindRooms</code>/<code>JoinRoomById</code>/<code>LeaveRoom</code>, <code>FRoomInfo</code>, 완료 델리게이트</td></tr>
+      <tr><td><code>ALobbyGameMode</code></td><td>Room 맵 게임모드 (폰 없음, PC/PS 지정)</td></tr>
+      <tr><td><code>ALobbyPlayerController</code></td><td>로컬 닉네임을 <code>ServerSetNickname</code> RPC로 서버 전달</td></tr>
+      <tr><td><code>ALobbyPlayerState</code></td><td>복제되는 <code>Nickname</code></td></tr>
+      <tr><td><code>ULobbyWidget</code></td><td>프로필 + 방만들기 + RoomList(병합)</td></tr>
+      <tr><td><code>URoomListEntryWidget</code></td><td>방 한 줄 (꽉 차면 Join 비활성)</td></tr>
+      <tr><td><code>URoomWidget</code></td><td>방 안 닉네임 목록 + 나가기</td></tr>
+      <tr><td><code>ULoginUserWidget</code> (수정)</td><td>로그인 성공 → <code>GetMe</code> → 닉네임 캐시 → <code>OpenLevel(Lobby)</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>주요 동작</h3>
+  <ul>
+    <li>방 세션: <code>NumPublicConnections=4</code>, <code>bIsLANMatch=true</code>, 커스텀 설정 <code>ROOMNAME</code>/<code>HOSTNAME</code> 저장</li>
+    <li>RoomList: <code>RoomId</code> 기준 <strong>병합</strong> — 새 방 추가·기존 방 갱신·<strong>검색에서 빠진 방은 제거하지 않음</strong>(요청 동작)</li>
+    <li>꽉 찬 방(<code>CurrentPlayers ≥ MaxPlayers</code>)은 Join 버튼 비활성</li>
+    <li>방 안 닉네임: 클라 <code>BeginPlay</code>→<code>ServerSetNickname</code> RPC→<code>PlayerState</code> 복제, 위젯은 <code>GameState-&gt;PlayerArray</code>를 0.5초 타이머로 갱신</li>
+  </ul>
+
+  <h3>설정 변경</h3>
+  <ul>
+    <li><code>Build.cs</code>: <code>OnlineSubsystem</code>, <code>OnlineSubsystemUtils</code> 추가</li>
+    <li><code>.uproject</code>: <code>OnlineSubsystemNull</code>, <code>OnlineSubsystemUtils</code> 플러그인 활성화</li>
+    <li><code>DefaultEngine.ini</code>: <code>GameInstanceClass</code> 지정, <code>[OnlineSubsystem] DefaultPlatformService=Null</code></li>
+  </ul>
+
+  <h3>블루프린트/에디터 연동</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>WBP</th><th>부모</th><th>배치할 위젯 (이름 정확히)</th></tr></thead>
+    <tbody>
+      <tr><td><code>WBP_Lobby</code></td><td><code>LobbyWidget</code></td><td><code>NicknameText</code>, <code>RoomNameInput</code>, <code>CreateRoomButton</code>, <code>RefreshButton</code>, <code>RoomListBox</code></td></tr>
+      <tr><td><code>WBP_RoomEntry</code></td><td><code>RoomListEntryWidget</code></td><td><code>RoomNameText</code>, <code>HostNameText</code>, <code>CountText</code>, <code>JoinButton</code></td></tr>
+      <tr><td><code>WBP_Room</code></td><td><code>RoomWidget</code></td><td><code>PlayerListBox</code>, <code>LeaveButton</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul>
+    <li><code>WBP_Lobby</code> → Class Defaults → Session → <code>Room Entry Widget Class</code> = <code>WBP_RoomEntry</code></li>
+    <li><code>Room</code> 맵 → World Settings → <code>GameMode Override</code> = <code>LobbyGameMode</code></li>
+    <li>Lobby/Room 맵 Level Blueprint(BeginPlay)에서 각 위젯 Create + Add to Viewport</li>
+  </ul>
+
   <h2>검증 상태</h2>
   <ul>
     <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
       <ul>
-        <li>1차: 모듈 컴파일 → <code>UnrealEditor-UEClient_20260715.dll</code> 생성 확인</li>
+        <li>1차: 계정 통신 모듈 컴파일 → <code>UnrealEditor-UEClient_20260715.dll</code> 생성 확인</li>
         <li>최초 <code>BuildSettingsVersion.V5</code> → 설치 엔진(V6)과 빌드 환경 충돌 → <strong>V6로 수정</strong> 후 성공</li>
-        <li>2차: 위젯 클래스 3종 UHT 처리 + 컴파일·링크 성공 (에디터 종료 후 빌드)</li>
+        <li>2차: 로그인/가입 위젯 클래스 3종 컴파일·링크 성공</li>
+        <li>3차: Lobby/세션 클래스 8종 + OnlineSubsystem 모듈 추가 후 <strong>전체 재빌드 성공</strong> (신규 UClass·플러그인이라 Live Coding 불가 → 에디터 종료 후 빌드)</li>
       </ul>
     </li>
-    <li><span class="pending">⏳ 엔드투엔드(실서버 통신 / BP 위젯 클릭)는 미실행</span> — 에디터 GUI + 서버 기동 필요. 아래 절차로 확인.</li>
+    <li><span class="pending">⏳ 엔드투엔드(실서버 통신 / BP 위젯 클릭 / 세션 방)는 미실행</span> — 에디터 GUI + 서버 기동 필요. 아래 절차로 확인.</li>
   </ul>
 
   <h2>엔드투엔드 테스트 방법</h2>
@@ -239,12 +313,22 @@ Account.Login test@a.com password123      # 탈퇴 후 → 401 기대</code></pr
   <p>기대 동작: 가입 201 → 중복 409 → 로그인 → 내 정보 → 탈퇴 204 → 재로그인 401.
      결과는 Output Log 창에 <code>[Account] ...</code>로 출력.</p>
 
+  <h3>Lobby / 세션 테스트</h3>
+  <ol>
+    <li>서버 기동 후, Editor Play 모드 = <strong>Standalone</strong>, Number of Players = <strong>2</strong>
+        (PIE 다중창은 GameInstance 공유로 닉네임 이슈 → Standalone 권장)</li>
+    <li>각 인스턴스에서 서로 다른 계정으로 로그인 → 자동으로 Lobby 진입, 프로필에 닉네임 표시</li>
+    <li>한쪽에서 방 이름 입력 후 방 만들기 → Room 맵으로 이동(리슨 호스트)</li>
+    <li>다른쪽에서 새로고침 → RoomList에 방 표시(호스트/인원) → 참가 → Room에서 서로 닉네임 확인</li>
+    <li>인원 4/4인 방은 Join 버튼 비활성 확인, 새로고침 시 목록이 갱신되되 기존 항목이 사라지지 않는지 확인</li>
+  </ol>
+
   <h2>남은/추후 작업 <span class="badge">범위 밖</span></h2>
   <ul>
-    <li>로그인 UI/위젯 (BP에서 델리게이트 바인딩으로 연결)</li>
+    <li>실제 게임플레이(Room 이후), 방장 위임, 방 비밀번호</li>
+    <li>인터넷 매치메이킹(Steam/EOS)</li>
     <li>토큰 디스크 영속화(자동 로그인), refresh 토큰</li>
-    <li>비밀번호 재설정, 소셜 로그인</li>
-    <li>엔드투엔드 실서버 통신 검증 (위 절차대로 수동 실행)</li>
+    <li>엔드투엔드 실서버 통신 + 세션 방 검증 (위 절차대로 수동 실행)</li>
   </ul>
 </main>
 </body>

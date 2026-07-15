@@ -8,6 +8,6 @@ public class UEClient_20260715 : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "UMG" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "HTTP", "Json", "Slate", "SlateCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "HTTP", "Json", "Slate", "SlateCore", "OnlineSubsystem", "OnlineSubsystemUtils" });
 	}
 }
