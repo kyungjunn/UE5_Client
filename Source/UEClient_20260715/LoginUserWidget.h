@@ -29,6 +29,14 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	UButton* LoginButton;
 
+	/** 회원가입 화면으로 이동하는 버튼. */
+	UPROPERTY(meta = (BindWidget))
+	UButton* SignupButton;
+
+	/** Signup 버튼으로 띄울 회원가입 위젯 클래스 (BP 기본값에서 WBP_Register 지정). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Account")
+	TSubclassOf<UUserWidget> RegisterWidgetClass;
+
 	/** 로그인 완료 시 호출. 화면 전환 등은 BP에서 처리. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Account")
 	void OnLoginFinished(bool bSuccess, const FString& Message);
@@ -36,6 +44,9 @@ protected:
 private:
 	UFUNCTION()
 	void HandleLoginClicked();
+
+	UFUNCTION()
+	void HandleSignupClicked();
 
 	UFUNCTION()
 	void HandleLoginCompleted(bool bSuccess, int32 StatusCode, const FString& Message);

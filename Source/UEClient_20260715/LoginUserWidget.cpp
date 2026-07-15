@@ -12,6 +12,10 @@ void ULoginUserWidget::NativeConstruct()
 	{
 		LoginButton->OnClicked.AddDynamic(this, &ULoginUserWidget::HandleLoginClicked);
 	}
+	if (SignupButton)
+	{
+		SignupButton->OnClicked.AddDynamic(this, &ULoginUserWidget::HandleSignupClicked);
+	}
 	if (UAccountSubsystem* Account = GetAccountSubsystem())
 	{
 		Account->OnLoginCompleted.AddDynamic(this, &ULoginUserWidget::HandleLoginCompleted);
@@ -23,6 +27,10 @@ void ULoginUserWidget::NativeDestruct()
 	if (LoginButton)
 	{
 		LoginButton->OnClicked.RemoveDynamic(this, &ULoginUserWidget::HandleLoginClicked);
+	}
+	if (SignupButton)
+	{
+		SignupButton->OnClicked.RemoveDynamic(this, &ULoginUserWidget::HandleSignupClicked);
 	}
 	if (UAccountSubsystem* Account = GetAccountSubsystem())
 	{
@@ -66,4 +74,28 @@ void ULoginUserWidget::HandleLoginCompleted(bool bSuccess, int32 StatusCode, con
 	}
 	SetStatus(Message, !bSuccess);
 	OnLoginFinished(bSuccess, Message);
+}
+
+void ULoginUserWidget::HandleSignupClicked()
+{
+	if (!RegisterWidgetClass)
+	{
+		SetStatus(TEXT("회원가입 위젯 클래스가 설정되지 않았습니다."), true);
+		return;
+	}
+
+	UUserWidget* RegisterWidget = nullptr;
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		RegisterWidget = CreateWidget<UUserWidget>(PC, RegisterWidgetClass);
+	}
+	else if (UWorld* World = GetWorld())
+	{
+		RegisterWidget = CreateWidget<UUserWidget>(World, RegisterWidgetClass);
+	}
+
+	if (RegisterWidget)
+	{
+		RegisterWidget->AddToViewport();
+	}
 }

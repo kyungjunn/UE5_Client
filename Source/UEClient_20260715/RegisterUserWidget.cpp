@@ -11,6 +11,10 @@ void URegisterUserWidget::NativeConstruct()
 	{
 		RegisterButton->OnClicked.AddDynamic(this, &URegisterUserWidget::HandleRegisterClicked);
 	}
+	if (ExitButton)
+	{
+		ExitButton->OnClicked.AddDynamic(this, &URegisterUserWidget::HandleExitClicked);
+	}
 	if (UAccountSubsystem* Account = GetAccountSubsystem())
 	{
 		Account->OnRegisterCompleted.AddDynamic(this, &URegisterUserWidget::HandleRegisterCompleted);
@@ -22,6 +26,10 @@ void URegisterUserWidget::NativeDestruct()
 	if (RegisterButton)
 	{
 		RegisterButton->OnClicked.RemoveDynamic(this, &URegisterUserWidget::HandleRegisterClicked);
+	}
+	if (ExitButton)
+	{
+		ExitButton->OnClicked.RemoveDynamic(this, &URegisterUserWidget::HandleExitClicked);
 	}
 	if (UAccountSubsystem* Account = GetAccountSubsystem())
 	{
@@ -66,4 +74,10 @@ void URegisterUserWidget::HandleRegisterCompleted(bool bSuccess, int32 StatusCod
 	}
 	SetStatus(Message, !bSuccess);
 	OnRegisterFinished(bSuccess, Message);
+}
+
+void URegisterUserWidget::HandleExitClicked()
+{
+	// 회원가입 위젯을 제거하면 아래 깔려 있던 Login 화면으로 돌아간다.
+	RemoveFromParent();
 }

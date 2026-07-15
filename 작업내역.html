@@ -185,11 +185,14 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
         <li><code>GetAccountSubsystem()</code>, <code>SetStatus(Message, bIsError)</code> (성공 초록 / 실패 빨강)</li>
       </ul>
     </li>
-    <li><code>ULoginUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>PasswordInput</code>, <code>LoginButton</code>
-      / BlueprintImplementableEvent <code>OnLoginFinished(bSuccess, Message)</code></li>
-    <li><code>URegisterUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code>, <code>RegisterButton</code>
+    <li><code>ULoginUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>PasswordInput</code>, <code>LoginButton</code>, <code>SignupButton</code>
+      / <code>RegisterWidgetClass</code>(TSubclassOf) / BlueprintImplementableEvent <code>OnLoginFinished(bSuccess, Message)</code></li>
+    <li><code>URegisterUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code>, <code>RegisterButton</code>, <code>ExitButton</code>
       / BlueprintImplementableEvent <code>OnRegisterFinished(bSuccess, Message)</code></li>
   </ul>
+  <p><strong>화면 전환:</strong> 로그인의 <code>SignupButton</code> → <code>RegisterWidgetClass</code> 위젯 생성 후 <code>AddToViewport</code>(오버레이);
+     회원가입의 <code>ExitButton</code> → <code>RemoveFromParent()</code>로 자신 제거 → 밑의 Login 복귀.
+     (Signup 클릭 → WBP_Register 오버레이 → X 클릭 → Login 복귀)</p>
   <p>동작: 버튼 클릭 → 입력값 공백 검사 → 버튼 비활성화 + "처리 중..." → 서브시스템 호출 →
      완료 델리게이트 수신 → 버튼 재활성화 → <code>StatusText</code> 반영 → <code>On...Finished</code> BP 이벤트 호출.
      구독은 <code>NativeConstruct</code>, 해제는 <code>NativeDestruct</code>. Build.cs에 <code>UMG</code>·<code>Slate</code>·<code>SlateCore</code> 추가.</p>
@@ -200,13 +203,14 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
     <thead><tr><th>위젯 BP</th><th>배치할 위젯 (이름 정확히)</th><th>타입</th></tr></thead>
     <tbody>
       <tr><td rowspan="2">Login</td><td><code>EmailInput</code>, <code>PasswordInput</code></td><td>Editable Text Box</td></tr>
-      <tr><td><code>LoginButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
+      <tr><td><code>LoginButton</code>, <code>SignupButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
       <tr><td rowspan="2">Register</td><td><code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code></td><td>Editable Text Box</td></tr>
-      <tr><td><code>RegisterButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
+      <tr><td><code>RegisterButton</code>, <code>ExitButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
     </tbody>
   </table>
   </div>
-  <p>성공 후 화면 전환 등은 <code>On Login Finished</code> / <code>On Register Finished</code> 이벤트에 연결.</p>
+  <p><code>WBP_Login</code>의 Class Defaults → Account → <code>Register Widget Class</code>에 <code>WBP_Register</code> 지정.
+     성공 후 화면 전환 등은 <code>On Login Finished</code> / <code>On Register Finished</code> 이벤트에 연결.</p>
 
   <h2>검증 상태</h2>
   <ul>
