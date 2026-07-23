@@ -483,8 +483,13 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
     <li>스크린샷: InGame(ThirdPerson 캐릭터 + NPC 2명 + "[F] 대화 시작" 프롬프트) /
         <strong>F 키 이벤트 주입 → 하단 채팅 UI 열림</strong>(도우 센세이 헤더 + 인사말 + 입력창) / Room(시작·나가기 호스트 뷰)</li>
     <li>PIE 2창 수동 E2E: 준비 → 시작 → InGame 동반 이동 → NPC 접근 → F 채팅 → 닫기 후 이동 재개 (사용자 확인)</li>
-    <li><strong>NPC 아이들 애니메이션 적용</strong>: CityFolks 팩은 전체(SK 메시·SKM_Manny·MM_Idle)가 <code>SKEL_DoughSensei</code>
-        스켈레톤 하나를 공유하는 것으로 확인 → <code>IdleAnim=MM_Idle</code> 로 두 NPC 모두 아이들 루프 재생 (스크린샷 확인)</li>
+    <li><strong>NPC 애니메이션 적용 (NPC별 차별화)</strong>: CityFolks 팩은 전체(SK 메시·SKM_Manny·데모 애니)가 <code>SKEL_DoughSensei</code>
+        스켈레톤 하나를 공유하는 것으로 확인 → 리타게팅 없이 맵 인스턴스 <code>IdleAnim</code> 지정만으로 루프 재생
+      <ul>
+        <li>도우 센세이: <code>MM_Idle</code> (느긋한 대기) — 스크린샷 확인</li>
+        <li>데포르티스타: <code>MM_Walk_InPlace</code> (제자리 걷기, 운동선수 컨셉) — 사용자 확인</li>
+      </ul>
+    </li>
   </ul>
 
   <h2>검증 상태</h2>
