@@ -422,6 +422,70 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
     <li>참고: 응답 지연은 thinking 때문 — 서버를 <code>--reasoning-budget 0</code> 으로 실행하면 단축됨</li>
   </ul>
 
+  <h2>7차 작업: InGame 레벨 + 준비/시작 플로우 + 필드 NPC 대화</h2>
+  <p>방에서 준비/시작을 거쳐 전원이 <strong>InGame 레벨</strong>로 이동, ThirdPerson 캐릭터로 돌아다니며
+     필드 NPC 에게 접근해 <strong>F 키로 LLM 채팅</strong>하는 기능. 사용자가 추가한 에셋
+     (CityFolks 캐릭터 팩, ThirdPerson 템플릿, EnhancedInput Content/Input) 활용.</p>
+
+  <h3>확정 설계</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>항목</th><th>결정</th></tr></thead>
+    <tbody>
+      <tr><td>NPC</td><td>2명 — 도우 센세이(요리 사부) + 데포르티스타(운동선수), 인스턴스별 프로필</td></tr>
+      <tr><td>시작 조건</td><td>호스트 제외 전원 준비 시 시작 가능 (혼자면 즉시 가능)</td></tr>
+      <tr><td>채팅 닫기</td><td>입력창 포커스 없을 때 F + ESC 항상 (한글 ㄹ=F키 오작동 방지)</td></tr>
+      <tr><td>InGame 맵</td><td>Lvl_ThirdPerson 복제(<code>Maps/InGame/InGame.umap</code>) + 바닥 ×4 + NPC 배치</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>준비/시작 플로우 (Room)</h3>
+  <ul>
+    <li><code>ALobbyPlayerState.bIsReady</code> 복제 추가, <code>ALobbyPlayerController</code> 에 <code>ServerSetReady</code> / <code>ServerRequestStartGame</code> RPC</li>
+    <li><code>URoomWidget</code>: 클라 전용 <strong>준비</strong> 토글 / 호스트 전용 <strong>시작</strong> 버튼(전원 준비 시 활성), 목록에 <code>[준비완료]</code> 표시</li>
+    <li>시작 → <code>ServerTravel("/Game/Maps/InGame/InGame?listen")</code> 로 방 전원 동반 이동</li>
+  </ul>
+
+  <h3>InGame 구성 (신규 C++ 4종 + 에셋)</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>클래스/에셋</th><th>역할</th></tr></thead>
+    <tbody>
+      <tr><td><code>AInGameGameMode</code> + <code>BP_InGameGM</code></td><td>Pawn=BP_ThirdPersonCharacter, PC=BP_InGamePC, PlayerState=LobbyPlayerState(닉네임 유지)</td></tr>
+      <tr><td><code>AInGamePlayerController</code> + <code>BP_InGamePC</code></td><td>F(IA_Interact) 바인딩, 프롬프트/채팅 토글, 채팅 중 IMC 제거로 이동·점프·시점 차단</td></tr>
+      <tr><td><code>ANpcActor</code></td><td>스켈레탈 메시 + 반경 250 거리 체크(0.25s) → 프롬프트 표시. <code>FNpcProfile</code>/IdleAnim 인스턴스별 설정</td></tr>
+      <tr><td><code>UInGameChatWidget</code> + <code>WBP_InGameChat</code></td><td>하단 도킹 검정 반투명(0.65) 채팅 바 — ESC 로 닫기 요청, NPC 프로필 주입</td></tr>
+      <tr><td><code>WBP_InteractPrompt</code></td><td>"[F] 대화 시작" 하단 중앙 프롬프트</td></tr>
+      <tr><td><code>IA_Interact</code> / <code>IMC_Interact</code></td><td>EnhancedInput F 키 (Content/Input, 기존 IMC_Default 는 무변경)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul>
+    <li>LLM 통신은 6차의 <code>NpcChatSubsystem</code> 그대로 재사용 (NPC별 성격 프롬프트만 교체)</li>
+    <li><code>Build.cs</code>: <code>EnhancedInput</code>, <code>InputCore</code> 추가</li>
+  </ul>
+
+  <h3>해결한 이슈 4건</h3>
+  <ol>
+    <li><strong>BP CDO 배선이 디스크에 저장 안 됨</strong> — <code>save_dirty_packages</code> 로는 리플렉션 CDO 수정이 저장되지 않음
+        → <code>save_directory(only_if_is_dirty=False)</code> 강제 저장 + 별도 프로세스로 디스크 재검증</li>
+    <li><strong><code>MapKey()</code> 가 저장에 반영 안 됨</strong> — C++/Python 모두 호출 직후에도 mappings 0개
+        → Python 에서 <code>mappings</code> 프로퍼티를 직접 설정</li>
+    <li><strong>프롬프트가 안 뜸</strong> — 폰 스폰 시 초기 오버랩이 빙의(possess) 전에 발생해 이벤트 유실
+        → 오버랩 대신 저빈도(0.25초) 거리 체크로 교체</li>
+    <li><strong>채팅 패널 높이 40px</strong> — 비스트레치 Y 앵커에서는 <code>Offsets.Bottom</code> 이 여백이 아니라 <strong>높이</strong> → 320 으로 수정</li>
+  </ol>
+
+  <h3>검증</h3>
+  <ul>
+    <li>빌드 성공, 커맨드릿 멱등 재실행 + 별도 프로세스 디스크 검증 통과</li>
+    <li>스크린샷: InGame(ThirdPerson 캐릭터 + NPC 2명 + "[F] 대화 시작" 프롬프트) /
+        <strong>F 키 이벤트 주입 → 하단 채팅 UI 열림</strong>(도우 센세이 헤더 + 인사말 + 입력창) / Room(시작·나가기 호스트 뷰)</li>
+    <li>PIE 2창 수동 E2E: 준비 → 시작 → InGame 동반 이동 → NPC 접근 → F 채팅 → 닫기 후 이동 재개 (사용자 확인)</li>
+    <li>참고: NPC 는 CityFolks 스켈레톤이 Manny 와 달라 바인드 포즈로 서 있음 (전용 애니 확보 시 <code>IdleAnim</code> 지정)</li>
+  </ul>
+
   <h2>검증 상태</h2>
   <ul>
     <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
@@ -436,6 +500,7 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
     <li><span class="ok">✅ 실서버 계정 API 검증 완료 (5차)</span> — Ubuntu 서버 상대로 실제 게임 클라이언트에서 회원가입 201 / 로그인 200 / 내 정보 200 확인</li>
     <li><span class="ok">✅ Lobby/세션 방 검증 완료 (4~5차)</span> — 스크린샷으로 UI 렌더링 확인, PIE 리슨서버 2창에서 방 생성/검색/참가/종료 정상 동작 (사용자 확인)</li>
     <li><span class="ok">✅ NPC 채팅 검증 완료 (6차)</span> — 게임 클라이언트 → 로컬 Gemma 실통신으로 성격 반영 응답 수신, 로비 UI 스크린샷 확인</li>
+    <li><span class="ok">✅ InGame/준비·시작 검증 완료 (7차)</span> — 스크린샷(캐릭터/NPC/프롬프트/F 채팅 UI/Room 버튼) + PIE 2창 수동 E2E (사용자 확인)</li>
   </ul>
 
   <h2>엔드투엔드 테스트 방법</h2>

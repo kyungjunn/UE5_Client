@@ -6,8 +6,15 @@
 #include "RoomWidget.h"
 #include "RoomListEntryWidget.h"
 #include "NpcChatWidget.h"
+#include "InGameChatWidget.h"
 #include "LobbyPlayerController.h"
 #include "LobbyGameMode.h"
+#include "InGamePlayerController.h"
+#include "InGameGameMode.h"
+
+#include "InputAction.h"
+#include "InputMappingContext.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintFactory.h"
@@ -173,6 +180,16 @@ namespace
 			Prop->SetPropertyValue_InContainer(CDO, Value);
 		}
 	}
+
+	// SetClassDefault 의 오브젝트 참조(FObjectProperty) 버전 (UInputAction* 등).
+	void SetObjectDefault(UBlueprint* BP, FName PropName, UObject* Value)
+	{
+		UObject* CDO = BP->GeneratedClass->GetDefaultObject();
+		if (FObjectProperty* Prop = CastField<FObjectProperty>(CDO->GetClass()->FindPropertyByName(PropName)))
+		{
+			Prop->SetPropertyValue_InContainer(CDO, Value);
+		}
+	}
 }
 
 void ULobbyAssetGenerator::GenerateLobbyAssets()
@@ -215,7 +232,12 @@ void ULobbyAssetGenerator::GenerateLobbyAssets()
 		UVerticalBox* PlayerList = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlayerListBox"));
 		VAdd(Root, PlayerList, ESlateSizeRule::Fill, HAlign_Fill, VAlign_Fill, FMargin(0, 0, 0, 24));
 
-		VAdd(Root, MakeButton(Tree, TEXT("LeaveButton"), TEXT("나가기")), ESlateSizeRule::Automatic, HAlign_Center, VAlign_Bottom, FMargin(0));
+		// 하단 버튼 바: 준비(클라 전용) / 시작(호스트 전용) / 나가기 — 표시 여부는 RoomWidget 이 제어
+		UHorizontalBox* BottomBar = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BottomBar"));
+		VAdd(Root, BottomBar, ESlateSizeRule::Automatic, HAlign_Center, VAlign_Bottom, FMargin(0));
+		HAdd(BottomBar, MakeButton(Tree, TEXT("ReadyButton"), TEXT("준비")), ESlateSizeRule::Automatic, VAlign_Center, FMargin(8, 0));
+		HAdd(BottomBar, MakeButton(Tree, TEXT("StartButton"), TEXT("시작")), ESlateSizeRule::Automatic, VAlign_Center, FMargin(8, 0));
+		HAdd(BottomBar, MakeButton(Tree, TEXT("LeaveButton"), TEXT("나가기")), ESlateSizeRule::Automatic, VAlign_Center, FMargin(8, 0));
 
 		Compile(Room);
 	}
@@ -357,6 +379,135 @@ void ULobbyAssetGenerator::GenerateNpcChatAssets()
 	UE_LOG(LogTemp, Display, TEXT("[LobbyGen] Rebuilt WBP_NpcChat and wired WBP_Lobby.NpcChatWidgetClass"));
 }
 
+void ULobbyAssetGenerator::GenerateInGameAssets()
+{
+	// 1) EnhancedInput 에셋: IA_Interact (F 키) + IMC_Interact
+	UInputAction* IA = LoadObject<UInputAction>(nullptr, TEXT("/Game/Input/Actions/IA_Interact.IA_Interact"));
+	if (!IA)
+	{
+		UPackage* Pkg = CreatePackage(TEXT("/Game/Input/Actions/IA_Interact"));
+		IA = NewObject<UInputAction>(Pkg, TEXT("IA_Interact"), RF_Public | RF_Standalone);
+		FAssetRegistryModule::AssetCreated(IA);
+	}
+	IA->ValueType = EInputActionValueType::Boolean;
+	IA->MarkPackageDirty();
+
+	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, TEXT("/Game/Input/IMC_Interact.IMC_Interact"));
+	if (!IMC)
+	{
+		UPackage* Pkg = CreatePackage(TEXT("/Game/Input/IMC_Interact"));
+		IMC = NewObject<UInputMappingContext>(Pkg, TEXT("IMC_Interact"), RF_Public | RF_Standalone);
+		FAssetRegistryModule::AssetCreated(IMC);
+	}
+	// 주의: MapKey()/UnmapAll() 은 여기서 호출해도 저장에 반영되지 않았다(검증됨).
+	// F 키 매핑은 호출측 Python 드라이버가 mappings 프로퍼티를 직접 설정한다.
+	IMC->MarkPackageDirty();
+
+	// 2) WBP_InGameChat — 화면 하단 검정 반투명 채팅 바 (부모 UInGameChatWidget)
+	UWidgetBlueprint* Chat = LoadOrCreateWidgetBP(TEXT("WBP_InGameChat"), UInGameChatWidget::StaticClass());
+	{
+		UWidgetTree* Tree = Chat->WidgetTree;
+		WipeTree(Tree);
+
+		UCanvasPanel* Canvas = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ChatCanvas"));
+		Tree->RootWidget = Canvas;
+
+		UBorder* Panel = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ChatRoot"));
+		Panel->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.65f));
+		Panel->SetHorizontalAlignment(HAlign_Fill);
+		Panel->SetVerticalAlignment(VAlign_Fill);
+		Panel->SetPadding(FMargin(20.f, 14.f));
+		Canvas->AddChild(Panel);
+		if (UCanvasPanelSlot* S = Cast<UCanvasPanelSlot>(Panel->Slot))
+		{
+			// 하단 도킹: 좌우 40 여백. Y 앵커가 비스트레치(1→1)이므로
+			// Top = 위치(-360 = 바닥에서 360 위), Bottom = "높이"(320) 로 해석된다.
+			S->SetAnchors(FAnchors(0.f, 1.f, 1.f, 1.f));
+			S->SetOffsets(FMargin(40.f, -360.f, 40.f, 320.f));
+		}
+
+		UVerticalBox* VB = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ChatVBox"));
+		Panel->AddChild(VB);
+
+		// 헤더: 소형 초상화 + 이름
+		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("NpcHeader"));
+		VAdd(VB, Header, ESlateSizeRule::Automatic, HAlign_Left, VAlign_Top, FMargin(0, 0, 0, 8));
+
+		USizeBox* PortraitSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PortraitSize"));
+		PortraitSize->SetWidthOverride(40.f);
+		PortraitSize->SetHeightOverride(40.f);
+		UBorder* Portrait = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PortraitBorder"));
+		Portrait->SetBrushColor(FLinearColor(0.55f, 0.35f, 0.75f, 1.f)); // 런타임에 프로필 색으로 갱신
+		Portrait->SetHorizontalAlignment(HAlign_Center);
+		Portrait->SetVerticalAlignment(VAlign_Center);
+		Portrait->AddChild(MakeText(Tree, TEXT("NpcInitialText"), TEXT("N"), 18));
+		PortraitSize->AddChild(Portrait);
+		HAdd(Header, PortraitSize, ESlateSizeRule::Automatic, VAlign_Center, FMargin(0, 0, 10, 0));
+		HAdd(Header, MakeText(Tree, TEXT("NpcNameText"), TEXT("NPC"), 22), ESlateSizeRule::Automatic, VAlign_Center, FMargin(0));
+
+		// 대화 로그
+		UScrollBox* Log = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ChatLogBox"));
+		VAdd(VB, Log, ESlateSizeRule::Fill, HAlign_Fill, VAlign_Fill, FMargin(0, 0, 0, 10));
+
+		// 입력 행
+		UHorizontalBox* InputRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ChatInputRow"));
+		VAdd(VB, InputRow, ESlateSizeRule::Automatic, HAlign_Fill, VAlign_Bottom, FMargin(0));
+		UEditableTextBox* Input = Tree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("ChatInput"));
+		Input->SetHintText(FText::FromString(TEXT("클릭해서 입력... (ESC 닫기)")));
+		HAdd(InputRow, Input, ESlateSizeRule::Fill, VAlign_Center, FMargin(0, 0, 8, 0));
+		HAdd(InputRow, MakeButton(Tree, TEXT("SendButton"), TEXT("전송")), ESlateSizeRule::Automatic, VAlign_Center, FMargin(0));
+
+		Compile(Chat);
+	}
+
+	// 3) WBP_InteractPrompt — "[F] 대화 시작" 프롬프트 (하단 중앙)
+	UWidgetBlueprint* Prompt = LoadOrCreateWidgetBP(TEXT("WBP_InteractPrompt"), UUserWidget::StaticClass());
+	{
+		UWidgetTree* Tree = Prompt->WidgetTree;
+		WipeTree(Tree);
+
+		UCanvasPanel* Canvas = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("PromptCanvas"));
+		Tree->RootWidget = Canvas;
+
+		UBorder* Box = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PromptBorder"));
+		Box->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.6f));
+		Box->SetPadding(FMargin(24.f, 12.f));
+		Box->AddChild(MakeText(Tree, TEXT("PromptText"), TEXT("[F] 대화 시작"), 26));
+		Canvas->AddChild(Box);
+		if (UCanvasPanelSlot* S = Cast<UCanvasPanelSlot>(Box->Slot))
+		{
+			S->SetAnchors(FAnchors(0.5f, 1.f));
+			S->SetAlignment(FVector2D(0.5f, 1.f));
+			S->SetPosition(FVector2D(0.f, -140.f));
+			S->SetAutoSize(true);
+		}
+
+		Compile(Prompt);
+	}
+
+	// 4) BP_InGamePC — AInGamePlayerController + 에셋 배선
+	UBlueprint* InGamePC = LoadOrCreateBP(TEXT("/Game/InGame"), TEXT("BP_InGamePC"), AInGamePlayerController::StaticClass());
+	Compile(InGamePC);
+	SetObjectDefault(InGamePC, TEXT("InteractAction"), IA);
+	SetObjectDefault(InGamePC, TEXT("InteractMappingContext"), IMC);
+	SetClassDefault(InGamePC, TEXT("ChatWidgetClass"), Chat->GeneratedClass);
+	SetClassDefault(InGamePC, TEXT("PromptWidgetClass"), Prompt->GeneratedClass);
+
+	// 5) BP_InGameGM — AInGameGameMode, Pawn=BP_ThirdPersonCharacter, PC=BP_InGamePC
+	UBlueprint* ThirdPersonChar = LoadObject<UBlueprint>(nullptr, TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter.BP_ThirdPersonCharacter"));
+	if (!ThirdPersonChar)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyGen] BP_ThirdPersonCharacter not found."));
+		return;
+	}
+	UBlueprint* InGameGM = LoadOrCreateBP(TEXT("/Game/InGame"), TEXT("BP_InGameGM"), AInGameGameMode::StaticClass());
+	Compile(InGameGM);
+	SetClassDefault(InGameGM, TEXT("DefaultPawnClass"), ThirdPersonChar->GeneratedClass);
+	SetClassDefault(InGameGM, TEXT("PlayerControllerClass"), InGamePC->GeneratedClass);
+
+	UE_LOG(LogTemp, Display, TEXT("[LobbyGen] Built IA/IMC_Interact, WBP_InGameChat, WBP_InteractPrompt, BP_InGamePC, BP_InGameGM"));
+}
+
 #else
 
 void ULobbyAssetGenerator::GenerateLobbyAssets()
@@ -368,6 +519,10 @@ void ULobbyAssetGenerator::GenerateRoomWiring()
 }
 
 void ULobbyAssetGenerator::GenerateNpcChatAssets()
+{
+}
+
+void ULobbyAssetGenerator::GenerateInGameAssets()
 {
 }
 

@@ -15,6 +15,10 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_Nickname, BlueprintReadOnly, Category = "Lobby")
 	FString Nickname;
 
+	/** 방에서 준비 완료 여부 (호스트 제외 전원 true 여야 시작 가능). */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Lobby")
+	bool bIsReady = false;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:

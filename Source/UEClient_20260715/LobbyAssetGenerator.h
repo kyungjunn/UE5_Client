@@ -36,4 +36,15 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "LobbyGen")
 	static void GenerateNpcChatAssets();
+
+	/**
+	 * InGame 에셋을 생성한다.
+	 *   IA_Interact / IMC_Interact (EnhancedInput, F 키)
+	 *   WBP_InGameChat (하단 반투명 채팅) / WBP_InteractPrompt ("[F] 대화 시작")
+	 *   BP_InGamePC (AInGamePlayerController + 위 에셋 배선)
+	 *   BP_InGameGM (AInGameGameMode, Pawn=BP_ThirdPersonCharacter, PC=BP_InGamePC)
+	 * (InGame 맵 복제/NPC 배치는 호출측 Python 에서 수행)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "LobbyGen")
+	static void GenerateInGameAssets();
 };

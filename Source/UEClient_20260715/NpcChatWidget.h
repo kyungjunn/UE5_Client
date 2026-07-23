@@ -24,6 +24,9 @@ class UNpcChatWidget : public UUserWidget
 public:
 	UNpcChatWidget(const FObjectInitializer& ObjectInitializer);
 
+	/** 생성 직후(AddToViewport 전) NPC 프로필 주입용. */
+	void SetNpcProfile(const FNpcProfile& InProfile) { NpcProfile = InProfile; }
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;

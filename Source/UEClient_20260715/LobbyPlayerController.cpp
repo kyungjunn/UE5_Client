@@ -3,6 +3,13 @@
 #include "LobbyPlayerState.h"
 #include "UEClientGameInstance.h"
 #include "Blueprint/UserWidget.h"
+#include "GameFramework/GameStateBase.h"
+#include "Engine/World.h"
+
+namespace
+{
+	const TCHAR* InGameMapPath = TEXT("/Game/Maps/InGame/InGame");
+}
 
 void ALobbyPlayerController::BeginPlay()
 {
@@ -38,4 +45,44 @@ void ALobbyPlayerController::ServerSetNickname_Implementation(const FString& InN
 	{
 		LobbyPS->Nickname = InNickname;
 	}
+}
+
+void ALobbyPlayerController::ServerSetReady_Implementation(bool bReady)
+{
+	if (ALobbyPlayerState* LobbyPS = GetPlayerState<ALobbyPlayerState>())
+	{
+		LobbyPS->bIsReady = bReady;
+	}
+}
+
+void ALobbyPlayerController::ServerRequestStartGame_Implementation()
+{
+	// 리슨서버에서 서버의 로컬 컨트롤러 = 호스트. 호스트의 요청만 처리한다.
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	const AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+	if (!GameState)
+	{
+		return;
+	}
+
+	// 호스트(자신) 제외 전원 준비 완료여야 시작 (혼자면 조건 없이 시작 가능).
+	for (const APlayerState* PS : GameState->PlayerArray)
+	{
+		if (PS == PlayerState)
+		{
+			continue;
+		}
+		const ALobbyPlayerState* LobbyPS = Cast<ALobbyPlayerState>(PS);
+		if (LobbyPS && !LobbyPS->bIsReady)
+		{
+			return;
+		}
+	}
+
+	World->ServerTravel(FString::Printf(TEXT("%s?listen"), InGameMapPath));
 }
