@@ -6,6 +6,7 @@
 #include "Components/EditableTextBox.h"
 #include "Components/Button.h"
 #include "Components/PanelWidget.h"
+#include "Components/Border.h"
 
 void ULobbyWidget::NativeConstruct()
 {
@@ -34,6 +35,15 @@ void ULobbyWidget::NativeConstruct()
 	{
 		Sessions->OnFindRoomsComplete.AddDynamic(this, &ULobbyWidget::HandleFindRoomsComplete);
 		Sessions->FindRooms();
+	}
+
+	// 우측 패널에 NPC 채팅 위젯을 꽂는다.
+	if (ChatPanelSlot && NpcChatWidgetClass)
+	{
+		if (UUserWidget* Chat = CreateWidget<UUserWidget>(this, NpcChatWidgetClass))
+		{
+			ChatPanelSlot->SetContent(Chat);
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ class UTextBlock;
 class UEditableTextBox;
 class UButton;
 class UPanelWidget;
+class UBorder;
 class URoomListEntryWidget;
 
 /**
@@ -44,6 +45,14 @@ protected:
 	/** RoomList 한 줄로 사용할 위젯 클래스 (WBP_RoomEntry 지정). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Session")
 	TSubclassOf<URoomListEntryWidget> RoomEntryWidgetClass;
+
+	/** NPC 채팅 패널이 들어갈 우측 슬롯 (없으면 채팅 비활성). */
+	UPROPERTY(meta = (BindWidgetOptional))
+	UBorder* ChatPanelSlot;
+
+	/** 우측 패널에 생성할 NPC 채팅 위젯 클래스 (WBP_NpcChat 지정). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NpcChat")
+	TSubclassOf<UUserWidget> NpcChatWidgetClass;
 
 private:
 	UFUNCTION()

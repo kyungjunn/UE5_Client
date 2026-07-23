@@ -362,6 +362,66 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
   <p>검증: 빌드 성공 + 게임 실행 콘솔 명령 회귀 테스트(로그인/내 정보 정상),
      PIE 리슨서버 2창에서 방 생성 → 새로고침 → 리스트 표시 → 참가 → 종료(크래시 없음) 정상 동작 확인.</p>
 
+  <h2>6차 작업: NPC 채팅 시스템 (로컬 LLM: llama.cpp + Gemma)</h2>
+  <p>로비 레벨에서 플레이어가 NPC "세라"와 채팅하는 시스템. LLM 백엔드는 로컬
+     llama.cpp 서버(<code>http://127.0.0.1:8080</code>, 모델 <code>gemma-4-E2B-it-Q8_0</code>)의
+     <strong>OpenAI 호환 <code>/v1/chat/completions</code></strong> 를 사용한다.</p>
+
+  <h3>확정 설계</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>항목</th><th>결정</th></tr></thead>
+    <tbody>
+      <tr><td>NPC</td><td>기본 1명 — "세라" (밝고 친절한 로비 안내원)</td></tr>
+      <tr><td>초상화</td><td>아트 에셋 없음 → 성격 색상 Border + 이니셜 플레이스홀더</td></tr>
+      <tr><td>대화 기억</td><td>단발 질문-답변 (히스토리 미포함)</td></tr>
+      <tr><td>배치</td><td>로비 우측 세로 패널 (우상단 초상화+이름 / 대화 로그 / 하단 입력+전송)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>UNpcChatSubsystem (UGameInstanceSubsystem, 신규)</h3>
+  <ul>
+    <li><strong><code>FNpcProfile</code> 구조체</strong>: <code>Name</code> / <code>Personality</code>(성격 지침) / <code>StatusLine</code>(상태 정보) / <code>PortraitColor</code></li>
+    <li><strong>요청 페이로드 조립</strong> (<code>BuildRequestBody</code>): system 메시지 =
+        <code>"당신은 '{이름}'입니다. {성격}\n현재 상태: {상태}\n답변은 한국어로 2~3문장 이내로 짧게 하세요."</code>
+        + user 메시지, <code>max_tokens 1024</code> / <code>temperature 0.7</code></li>
+    <li><strong>비동기 + 델리게이트</strong>: HTTP 완료 시 <code>OnChatResponseReceived(bool, NpcName, Message)</code>
+        (BlueprintAssignable) 브로드캐스트. 연결 실패/비2xx/빈 응답은 bSuccess=false + 에러 설명</li>
+    <li>진행 중 요청 가드(<code>bRequestInFlight</code>), <code>SetLlmBaseUrl</code></li>
+    <li>콘솔 명령: <code>Npc.Chat &lt;message&gt;</code> / <code>Npc.SetLlmUrl &lt;url&gt;</code> (중복 등록 가드 포함)</li>
+  </ul>
+
+  <h3>UNpcChatWidget (신규) + 에셋</h3>
+  <ul>
+    <li>BindWidget: <code>PortraitBorder</code>/<code>NpcInitialText</code>(초상화), <code>NpcNameText</code>, <code>ChatLogBox</code>(ScrollBox), <code>ChatInput</code>, <code>SendButton</code></li>
+    <li>전송(버튼/Enter) → "나: ..." 추가 + 버튼 비활성 + "세라: ..." 대기 표시 → 응답으로 교체 + 자동 스크롤</li>
+    <li><code>NpcProfile</code> 기본값은 세라 (BP Class Defaults 에서 이름/성격/상태/색 변경 가능)</li>
+    <li><code>ULobbyWidget</code>: 우측 <code>ChatPanelSlot</code>(BindWidgetOptional) + <code>NpcChatWidgetClass</code> → NativeConstruct 에서 채팅 위젯 삽입</li>
+    <li><code>LobbyAssetGenerator::GenerateNpcChatAssets()</code>: <strong>WBP_NpcChat</strong> 생성 +
+        <strong>WBP_Lobby 2컬럼 재구성</strong>(왼쪽 로비 fill + 오른쪽 채팅 고정폭 420px) + CDO 배선</li>
+  </ul>
+
+  <h3>해결한 이슈 2건</h3>
+  <ol>
+    <li><strong><code>localhost</code> 연결 실패</strong> — UE HTTP 가 <code>localhost</code>를 IPv6(<code>::1</code>)로 해석하는데
+        llama.cpp 는 IPv4만 리슨 → 기본 URL 을 <code>http://127.0.0.1:8080</code> 으로 변경</li>
+    <li><strong>60초 타임아웃</strong> — Gemma(thinking 모델)가 생성에 ~46초+ 소요, UE 무활동(activity) 타임아웃도 존재
+        → <code>SetTimeout(180)</code> + <code>SetActivityTimeout(180)</code></li>
+  </ol>
+
+  <h3>검증</h3>
+  <ul>
+    <li>빌드 성공, 에셋 생성 커맨드릿 멱등 2회 실행 확인</li>
+    <li><strong>E2E 성공</strong>: 게임 클라이언트 <code>Npc.Chat</code> → Gemma 실응답 수신</li>
+  </ul>
+  <pre><code>[NpcChat] 성공 (세라) 안녕하세요! 만나서 정말 반가워요! 😊 오늘 기분도 너무 좋아서
+신나는데요, 어떤 방을 만들거나 참가하고 싶으신가요? 제가 신나게 도와드릴게요!</code></pre>
+  <ul>
+    <li>스크린샷: 좌상단 "로비 (Lobby)" / 우상단 세라 초상화+이름 / 우측 채팅 패널 렌더링 확인</li>
+    <li>참고: 응답 지연은 thinking 때문 — 서버를 <code>--reasoning-budget 0</code> 으로 실행하면 단축됨</li>
+  </ul>
+
   <h2>검증 상태</h2>
   <ul>
     <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
@@ -375,6 +435,7 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
     </li>
     <li><span class="ok">✅ 실서버 계정 API 검증 완료 (5차)</span> — Ubuntu 서버 상대로 실제 게임 클라이언트에서 회원가입 201 / 로그인 200 / 내 정보 200 확인</li>
     <li><span class="ok">✅ Lobby/세션 방 검증 완료 (4~5차)</span> — 스크린샷으로 UI 렌더링 확인, PIE 리슨서버 2창에서 방 생성/검색/참가/종료 정상 동작 (사용자 확인)</li>
+    <li><span class="ok">✅ NPC 채팅 검증 완료 (6차)</span> — 게임 클라이언트 → 로컬 Gemma 실통신으로 성격 반영 응답 수신, 로비 UI 스크린샷 확인</li>
   </ul>
 
   <h2>엔드투엔드 테스트 방법</h2>

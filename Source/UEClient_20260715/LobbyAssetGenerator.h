@@ -27,4 +27,13 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "LobbyGen")
 	static void GenerateRoomWiring();
+
+	/**
+	 * NPC 채팅 에셋을 생성한다.
+	 *   WBP_NpcChat (UNpcChatWidget: 초상화/이름 + 대화 로그 + 입력/전송)
+	 *   WBP_Lobby 의 NpcChatWidgetClass = WBP_NpcChat 배선
+	 * (WBP_Lobby 레이아웃의 우측 ChatPanelSlot 은 GenerateLobbyAssets 가 만든다)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "LobbyGen")
+	static void GenerateNpcChatAssets();
 };

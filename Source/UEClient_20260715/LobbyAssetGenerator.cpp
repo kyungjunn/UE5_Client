@@ -5,6 +5,7 @@
 #include "LobbyWidget.h"
 #include "RoomWidget.h"
 #include "RoomListEntryWidget.h"
+#include "NpcChatWidget.h"
 #include "LobbyPlayerController.h"
 #include "LobbyGameMode.h"
 
@@ -20,6 +21,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScrollBox.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Button.h"
@@ -225,12 +227,19 @@ void ULobbyAssetGenerator::GenerateLobbyAssets()
 		WipeTree(Tree);
 		UVerticalBox* Root = BuildScreenRoot(Tree, ColorBg, 60.f);
 
-		VAdd(Root, MakeText(Tree, TEXT("TitleText"), TEXT("로비 (Lobby)"), 48), ESlateSizeRule::Automatic, HAlign_Left, VAlign_Top, FMargin(0, 0, 0, 8));
-		VAdd(Root, MakeText(Tree, TEXT("NicknameText"), TEXT("닉네임"), 24, FLinearColor(0.6f, 0.85f, 1.f, 1.f)), ESlateSizeRule::Automatic, HAlign_Left, VAlign_Top, FMargin(0, 0, 0, 24));
+		// 본문: 왼쪽 로비 컬럼(fill) + 오른쪽 NPC 채팅 패널(고정폭)
+		UHorizontalBox* Body = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BodyBox"));
+		VAdd(Root, Body, ESlateSizeRule::Fill, HAlign_Fill, VAlign_Fill, FMargin(0));
+
+		UVerticalBox* Left = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftColumn"));
+		HAdd(Body, Left, ESlateSizeRule::Fill, VAlign_Fill, FMargin(0, 0, 24, 0));
+
+		VAdd(Left, MakeText(Tree, TEXT("TitleText"), TEXT("로비 (Lobby)"), 48), ESlateSizeRule::Automatic, HAlign_Left, VAlign_Top, FMargin(0, 0, 0, 8));
+		VAdd(Left, MakeText(Tree, TEXT("NicknameText"), TEXT("닉네임"), 24, FLinearColor(0.6f, 0.85f, 1.f, 1.f)), ESlateSizeRule::Automatic, HAlign_Left, VAlign_Top, FMargin(0, 0, 0, 24));
 
 		// 상단 바: 방 이름 입력 + 방 만들기 + 새로고침
 		UHorizontalBox* TopBar = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("TopBar"));
-		VAdd(Root, TopBar, ESlateSizeRule::Automatic, HAlign_Fill, VAlign_Top, FMargin(0, 0, 0, 24));
+		VAdd(Left, TopBar, ESlateSizeRule::Automatic, HAlign_Fill, VAlign_Top, FMargin(0, 0, 0, 24));
 
 		UEditableTextBox* Input = Tree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RoomNameInput"));
 		Input->SetHintText(FText::FromString(TEXT("방 이름을 입력하세요")));
@@ -240,7 +249,19 @@ void ULobbyAssetGenerator::GenerateLobbyAssets()
 
 		// 방 목록 (남은 공간 전부)
 		UScrollBox* RoomList = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("RoomListBox"));
-		VAdd(Root, RoomList, ESlateSizeRule::Fill, HAlign_Fill, VAlign_Fill, FMargin(0));
+		VAdd(Left, RoomList, ESlateSizeRule::Fill, HAlign_Fill, VAlign_Fill, FMargin(0));
+
+		// 우측: NPC 채팅 패널 슬롯 (내용은 ULobbyWidget 이 NpcChatWidgetClass 로 채운다)
+		USizeBox* ChatSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ChatPanelSize"));
+		ChatSize->SetWidthOverride(420.f);
+		HAdd(Body, ChatSize, ESlateSizeRule::Automatic, VAlign_Fill, FMargin(0));
+
+		UBorder* ChatSlot = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ChatPanelSlot"));
+		ChatSlot->SetBrushColor(FLinearColor::Transparent);
+		ChatSlot->SetHorizontalAlignment(HAlign_Fill);
+		ChatSlot->SetVerticalAlignment(VAlign_Fill);
+		ChatSlot->SetPadding(FMargin(0.f));
+		ChatSize->AddChild(ChatSlot);
 
 		Compile(Lobby);
 	}
@@ -273,6 +294,69 @@ void ULobbyAssetGenerator::GenerateRoomWiring()
 	UE_LOG(LogTemp, Display, TEXT("[LobbyGen] Created BP_RoomPC (WBP_Room) / BP_RoomGM (BP_RoomPC)"));
 }
 
+void ULobbyAssetGenerator::GenerateNpcChatAssets()
+{
+	// WBP_NpcChat — 상단(초상화+이름) / 중앙(대화 로그) / 하단(입력+전송)
+	UWidgetBlueprint* Chat = LoadOrCreateWidgetBP(TEXT("WBP_NpcChat"), UNpcChatWidget::StaticClass());
+	{
+		UWidgetTree* Tree = Chat->WidgetTree;
+		WipeTree(Tree);
+
+		// ChatPanelSlot(Border) 안에 들어가므로 콘텐츠 크기를 갖는 Border 를 루트로 사용.
+		UBorder* Panel = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ChatRoot"));
+		Panel->SetBrushColor(ColorPanel);
+		Panel->SetHorizontalAlignment(HAlign_Fill);
+		Panel->SetVerticalAlignment(VAlign_Fill);
+		Panel->SetPadding(FMargin(16.f));
+		Tree->RootWidget = Panel;
+
+		UVerticalBox* VB = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ChatVBox"));
+		Panel->AddChild(VB);
+
+		// 상단: 초상화(색 배경 + 이니셜) + 이름 — 화면 우측 상단 끝에 위치
+		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("NpcHeader"));
+		VAdd(VB, Header, ESlateSizeRule::Automatic, HAlign_Right, VAlign_Top, FMargin(0, 0, 0, 16));
+
+		USizeBox* PortraitSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PortraitSize"));
+		PortraitSize->SetWidthOverride(64.f);
+		PortraitSize->SetHeightOverride(64.f);
+		UBorder* Portrait = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PortraitBorder"));
+		Portrait->SetBrushColor(FLinearColor(0.55f, 0.35f, 0.75f, 1.f)); // 런타임에 프로필 색으로 갱신됨
+		Portrait->SetHorizontalAlignment(HAlign_Center);
+		Portrait->SetVerticalAlignment(VAlign_Center);
+		Portrait->AddChild(MakeText(Tree, TEXT("NpcInitialText"), TEXT("세"), 28));
+		PortraitSize->AddChild(Portrait);
+		HAdd(Header, PortraitSize, ESlateSizeRule::Automatic, VAlign_Center, FMargin(0, 0, 12, 0));
+		HAdd(Header, MakeText(Tree, TEXT("NpcNameText"), TEXT("세라"), 30), ESlateSizeRule::Automatic, VAlign_Center, FMargin(0));
+
+		// 중앙: 대화 로그
+		UScrollBox* Log = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ChatLogBox"));
+		VAdd(VB, Log, ESlateSizeRule::Fill, HAlign_Fill, VAlign_Fill, FMargin(0, 0, 0, 16));
+
+		// 하단: 입력 + 전송
+		UHorizontalBox* InputRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ChatInputRow"));
+		VAdd(VB, InputRow, ESlateSizeRule::Automatic, HAlign_Fill, VAlign_Bottom, FMargin(0));
+
+		UEditableTextBox* Input = Tree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("ChatInput"));
+		Input->SetHintText(FText::FromString(TEXT("메시지를 입력하세요")));
+		HAdd(InputRow, Input, ESlateSizeRule::Fill, VAlign_Center, FMargin(0, 0, 8, 0));
+		HAdd(InputRow, MakeButton(Tree, TEXT("SendButton"), TEXT("전송")), ESlateSizeRule::Automatic, VAlign_Center, FMargin(0));
+
+		Compile(Chat);
+	}
+
+	// WBP_Lobby 의 우측 패널에 이 위젯을 쓰도록 CDO 배선
+	UWidgetBlueprint* Lobby = LoadObject<UWidgetBlueprint>(nullptr, TEXT("/Game/Lobby/Widget/WBP_Lobby.WBP_Lobby"));
+	if (!Lobby)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyGen] WBP_Lobby not found; run GenerateLobbyAssets first."));
+		return;
+	}
+	SetClassDefault(Lobby, TEXT("NpcChatWidgetClass"), Chat->GeneratedClass);
+
+	UE_LOG(LogTemp, Display, TEXT("[LobbyGen] Rebuilt WBP_NpcChat and wired WBP_Lobby.NpcChatWidgetClass"));
+}
+
 #else
 
 void ULobbyAssetGenerator::GenerateLobbyAssets()
@@ -280,6 +364,10 @@ void ULobbyAssetGenerator::GenerateLobbyAssets()
 }
 
 void ULobbyAssetGenerator::GenerateRoomWiring()
+{
+}
+
+void ULobbyAssetGenerator::GenerateNpcChatAssets()
 {
 }
 
