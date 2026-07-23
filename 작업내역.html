@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>작업 내역 — UE5 계정 서버 통신 클라이언트</title>
+<title>작업 내역 — UE5 멀티플레이 클라이언트</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -88,30 +88,43 @@
 </head>
 <body>
 <main>
-  <h1>작업 내역 — UE5 계정 서버 통신 클라이언트</h1>
-  <p class="date">작성일: 2026-07-15</p>
+  <h1>작업 내역 — UE5 멀티플레이 클라이언트</h1>
+  <p class="date">작성일: 2026-07-15 / 최종 갱신: 2026-07-23</p>
 
   <h2>개요</h2>
-  <p>언리얼 엔진 5.7 클라이언트(<code>UEClient_20260715</code>)에서 계정 백엔드 서버(FastAPI + MySQL)와
-     REST(JSON)로 통신하는 <strong>C++ 클라이언트</strong>를 구현했다.
-     회원가입 · 로그인 · 내 정보 조회 · 회원탈퇴 4개 기능을 제공한다.</p>
-  <p>기존 프로젝트는 블루프린트 전용(Source 없음)이었으며, 이번 작업으로 <strong>C++ 프로젝트로 전환</strong>했다.</p>
+  <p>언리얼 엔진 5.7 클라이언트(<code>UEClient_20260715</code>). 블루프린트 전용 프로젝트를
+     <strong>C++ 프로젝트로 전환</strong>하고 아래 시스템을 구현했다.</p>
+  <ul>
+    <li><strong>계정 시스템</strong> — FastAPI + MySQL 백엔드(Ubuntu)와 REST(JSON) 통신: 회원가입 · 로그인 · 내 정보 · 회원탈퇴</li>
+    <li><strong>로그인/회원가입 UI</strong> — UserWidget C++ 베이스 + 화면 전환</li>
+    <li><strong>로비/세션(방) 시스템</strong> — OnlineSubsystem(NULL/LAN) 리슨서버: 방 생성/검색/참가, 닉네임 복제</li>
+    <li><strong>NPC 채팅(LLM)</strong> — 로컬 llama.cpp + Gemma 서버와 통신, 성격 프롬프트 조립, 로비 NPC "세라"</li>
+    <li><strong>방 준비/시작 → InGame</strong> — 전원 준비 후 시작, ThirdPerson 레벨에서 필드 NPC(F 키 대화)</li>
+    <li><strong>UI 에셋 파이프라인</strong> — 에디터 전용 C++ 도구 + Python 커맨드릿으로 위젯/BP/맵 자동 생성</li>
+  </ul>
 
   <h2>확정된 설계 결정</h2>
   <div class="table-wrap">
   <table>
     <thead><tr><th>항목</th><th>결정</th></tr></thead>
     <tbody>
-      <tr><td>구현 방식</td><td>C++ (언리얼 HTTP 모듈)</td></tr>
-      <tr><td>아키텍처</td><td><code>UGameInstanceSubsystem</code> 단일 클래스 (A안)</td></tr>
+      <tr><td>통신 방식</td><td>C++ (언리얼 HTTP 모듈), REST/JSON</td></tr>
+      <tr><td>계정 아키텍처</td><td><code>UGameInstanceSubsystem</code> 단일 클래스</td></tr>
       <tr><td>호출 방식</td><td><code>BlueprintCallable</code> 함수 + 콘솔 명령어 (둘 다)</td></tr>
       <tr><td>토큰 보관</td><td>JWT 메모리 보관 (재시작 시 소멸)</td></tr>
-      <tr><td>서버 주소</td><td>기본 <code>http://192.168.0.106:8088</code> — Ubuntu 서버, 5차에서 변경 (<code>SetBaseUrl</code>로 변경 가능)</td></tr>
+      <tr><td>계정 서버 주소</td><td>기본 <code>http://192.168.0.106:8088</code> — Ubuntu 서버 (<code>SetBaseUrl</code>로 변경 가능)</td></tr>
+      <tr><td>LLM 서버</td><td>llama.cpp OpenAI 호환 <code>/v1/chat/completions</code>, 기본 <code>http://127.0.0.1:8080</code> (<code>SetLlmBaseUrl</code>)</td></tr>
+      <tr><td>OnlineSubsystem</td><td>NULL (LAN) — 리슨 서버 모델</td></tr>
+      <tr><td>레벨 구조</td><td>Login → Lobby(브라우저) → Room(대기방) → InGame(ThirdPerson)</td></tr>
+      <tr><td>닉네임 보관</td><td>커스텀 <code>UGameInstance</code> 캐시 + <code>LobbyPlayerState</code> 복제</td></tr>
+      <tr><td>NPC 대화</td><td>단발 질문-답변 (히스토리 미포함), NPC별 <code>FNpcProfile</code>(이름/성격/상태/색)</td></tr>
     </tbody>
   </table>
   </div>
 
-  <h2>서버 계약 <span class="badge">서버 소스에서 직접 확인</span></h2>
+  <h2>계정 서버 통신 (UAccountSubsystem)</h2>
+
+  <h3>서버 계약 <span class="badge">인증: Bearer JWT (HS256)</span></h3>
   <div class="table-wrap">
   <table>
     <thead><tr><th>API</th><th>요청 본문</th><th>성공 응답</th><th>실패</th></tr></thead>
@@ -123,119 +136,36 @@
     </tbody>
   </table>
   </div>
+
+  <h3>구현</h3>
   <ul>
-    <li>인증: <code>Authorization: Bearer &lt;access_token&gt;</code> (JWT, HS256)</li>
-    <li>에러 본문: FastAPI 표준 <code>{"detail": "..."}</code> (문자열) / 422는 <code>{"detail": [{"msg": ...}]}</code> (배열)</li>
+    <li><code>FAccountUser</code>(USTRUCT) / 다이내믹 멀티캐스트 델리게이트 4종 (<code>OnRegisterCompleted</code> 등, BP 바인딩용)</li>
+    <li><code>Register</code> / <code>Login</code> / <code>GetMe</code> / <code>Withdraw</code> / <code>SetBaseUrl</code> (BlueprintCallable)</li>
+    <li>콘솔 명령: <code>Account.Register</code> <code>Account.Login</code> <code>Account.Me</code> <code>Account.Withdraw</code> <code>Account.SetBaseUrl</code> — 결과는 <code>[Account]</code> 로그</li>
+    <li>에러 처리: 연결 실패(StatusCode 0) / 비2xx <code>detail</code> 파싱(422 배열은 첫 <code>msg</code>) / 토큰 없는 인증 API 는 즉시 실패</li>
+    <li>PIE 다중 인스턴스에서 콘솔 명령 중복 등록 → 종료 시 이중 해제 크래시 방지 가드(<code>FindConsoleObject</code>)</li>
   </ul>
 
-  <h2>구현 결과</h2>
-
-  <h3>데이터 구조 / 델리게이트</h3>
+  <h2>로그인 / 회원가입 위젯</h2>
   <ul>
-    <li><code>FAccountUser</code> (USTRUCT, BlueprintType) — Id, Email, Nickname, CreatedAt</li>
-    <li><code>FAccountSimpleResult(bool, int32, FString)</code> — 로그인 / 탈퇴</li>
-    <li><code>FAccountUserResult(bool, int32, FString, FAccountUser)</code> — 회원가입 / 내 정보</li>
+    <li><code>UAuthUserWidgetBase</code>(Abstract): <code>StatusText</code>(선택) 상태 출력, 성공 초록/실패 빨강</li>
+    <li><code>ULoginUserWidget</code>: <code>EmailInput</code> <code>PasswordInput</code> <code>LoginButton</code> <code>SignupButton</code> + <code>RegisterWidgetClass</code>
+        — 로그인 성공 → <code>GetMe</code> → 닉네임 캐시 → <code>OpenLevel(Lobby)</code></li>
+    <li><code>URegisterUserWidget</code>: <code>EmailInput</code> <code>NicknameInput</code> <code>PasswordInput</code> <code>RegisterButton</code> <code>ExitButton</code></li>
+    <li>화면 전환: Signup 클릭 → WBP_Register 오버레이 → X 클릭 → Login 복귀</li>
+    <li>동작: 클릭 → 공백 검사 → 버튼 비활성 + "처리 중..." → 완료 델리게이트 → 재활성 + 상태 반영 + <code>On...Finished</code> BP 이벤트</li>
   </ul>
 
-  <h3>UAccountSubsystem (UGameInstanceSubsystem)</h3>
-  <ul>
-    <li>상태: <code>BaseUrl</code>, <code>AuthToken</code>(메모리)</li>
-    <li><code>UFUNCTION(BlueprintCallable)</code>: Register / Login / GetMe / Withdraw / SetBaseUrl</li>
-    <li><code>BlueprintAssignable</code> 델리게이트 4개: OnRegisterCompleted / OnLoginCompleted / OnMeCompleted / OnWithdrawCompleted</li>
-    <li>Me/Withdraw는 토큰 없으면 요청 없이 즉시 실패 처리</li>
-  </ul>
-
-  <h3>콘솔 명령어</h3>
-  <pre><code>Account.Register &lt;email&gt; &lt;nickname&gt; &lt;password&gt;
-Account.Login &lt;email&gt; &lt;password&gt;
-Account.Me
-Account.Withdraw
-Account.SetBaseUrl &lt;url&gt;</code></pre>
-  <p>결과는 델리게이트 구독으로 <code>UE_LOG</code> 자동 출력 (콘솔·BP 어디서 호출하든).</p>
-
-  <h3>에러 처리</h3>
-  <ul>
-    <li>연결 실패 → <code>bSuccess=false, StatusCode=0, "서버에 연결할 수 없습니다."</code></li>
-    <li>2xx → 성공 / 비2xx → <code>detail</code> 파싱 (문자열 그대로 / 422 배열은 첫 <code>msg</code>)</li>
-    <li>인증 필요 API인데 토큰 없음 → 요청 없이 <code>"로그인이 필요합니다."</code></li>
-    <li>204(withdraw)는 본문 파싱 없이 성공 처리</li>
-  </ul>
-
-  <h3>프로젝트 구조</h3>
-  <pre><code>Source/
-  UEClient_20260715.Target.cs          # 게임 타깃 (DefaultBuildSettings V6)
-  UEClient_20260715Editor.Target.cs    # 에디터 타깃 (V6)
-  UEClient_20260715/
-    UEClient_20260715.Build.cs         # 의존성: Core, CoreUObject, Engine, UMG, HTTP, Json, Slate, SlateCore
-    UEClient_20260715.h / .cpp         # IMPLEMENT_PRIMARY_GAME_MODULE
-    AccountSubsystem.h / .cpp          # 통신 클라이언트 (핵심)
-    AuthUserWidgetBase.h / .cpp        # 로그인/가입 위젯 공통 베이스
-    LoginUserWidget.h / .cpp           # 로그인 위젯
-    RegisterUserWidget.h / .cpp        # 회원가입 위젯
-UEClient_20260715.uproject             # "Modules" 항목 추가
-docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
-작업내역.md / 작업내역.html            # 본 문서</code></pre>
-
-  <h2>2차 작업: 로그인 / 회원가입 UserWidget 연동 (C++ 베이스)</h2>
-  <p><code>UAccountSubsystem</code>을 호출하고 결과를 UI에 반영하는 UserWidget C++ 베이스 클래스를 추가했다.</p>
-  <ul>
-    <li><code>UAuthUserWidgetBase</code> (UUserWidget, Abstract) — 공통 베이스
-      <ul>
-        <li><code>StatusText</code> (BindWidgetOptional) 상태 메시지 출력</li>
-        <li><code>GetAccountSubsystem()</code>, <code>SetStatus(Message, bIsError)</code> (성공 초록 / 실패 빨강)</li>
-      </ul>
-    </li>
-    <li><code>ULoginUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>PasswordInput</code>, <code>LoginButton</code>, <code>SignupButton</code>
-      / <code>RegisterWidgetClass</code>(TSubclassOf) / BlueprintImplementableEvent <code>OnLoginFinished(bSuccess, Message)</code></li>
-    <li><code>URegisterUserWidget</code> — BindWidget: <code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code>, <code>RegisterButton</code>, <code>ExitButton</code>
-      / BlueprintImplementableEvent <code>OnRegisterFinished(bSuccess, Message)</code></li>
-  </ul>
-  <p><strong>화면 전환:</strong> 로그인의 <code>SignupButton</code> → <code>RegisterWidgetClass</code> 위젯 생성 후 <code>AddToViewport</code>(오버레이);
-     회원가입의 <code>ExitButton</code> → <code>RemoveFromParent()</code>로 자신 제거 → 밑의 Login 복귀.
-     (Signup 클릭 → WBP_Register 오버레이 → X 클릭 → Login 복귀)</p>
-  <p>동작: 버튼 클릭 → 입력값 공백 검사 → 버튼 비활성화 + "처리 중..." → 서브시스템 호출 →
-     완료 델리게이트 수신 → 버튼 재활성화 → <code>StatusText</code> 반영 → <code>On...Finished</code> BP 이벤트 호출.
-     구독은 <code>NativeConstruct</code>, 해제는 <code>NativeDestruct</code>. Build.cs에 <code>UMG</code>·<code>Slate</code>·<code>SlateCore</code> 추가.</p>
-
-  <h3>블루프린트 연동</h3>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>위젯 BP</th><th>배치할 위젯 (이름 정확히)</th><th>타입</th></tr></thead>
-    <tbody>
-      <tr><td rowspan="2">Login</td><td><code>EmailInput</code>, <code>PasswordInput</code></td><td>Editable Text Box</td></tr>
-      <tr><td><code>LoginButton</code>, <code>SignupButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
-      <tr><td rowspan="2">Register</td><td><code>EmailInput</code>, <code>NicknameInput</code>, <code>PasswordInput</code></td><td>Editable Text Box</td></tr>
-      <tr><td><code>RegisterButton</code>, <code>ExitButton</code> / <code>StatusText</code>(선택)</td><td>Button / Text Block</td></tr>
-    </tbody>
-  </table>
-  </div>
-  <p><code>WBP_Login</code>의 Class Defaults → Account → <code>Register Widget Class</code>에 <code>WBP_Register</code> 지정.
-     성공 후 화면 전환 등은 <code>On Login Finished</code> / <code>On Register Finished</code> 이벤트에 연결.</p>
-
-  <h2>3차 작업: Lobby / 세션(방) 시스템</h2>
-  <p>로그인 성공 후 <strong>Lobby 레벨</strong>로 이동해 프로필(닉네임)을 보여주고,
-     언리얼 <strong>OnlineSubsystem(NULL/LAN)</strong> 세션으로 <strong>방 생성 / 방 참가</strong>를 구현했다.</p>
-
-  <h3>확정 설계</h3>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>항목</th><th>결정</th></tr></thead>
-    <tbody>
-      <tr><td>OnlineSubsystem</td><td>NULL (LAN) — 리슨 서버 모델</td></tr>
-      <tr><td>레벨 구조</td><td>Lobby(브라우저) 맵 + Room(실제 방) 맵 분리</td></tr>
-      <tr><td>프로필 표시</td><td>닉네임만 (로그인 후 <code>GetMe</code>로 취득)</td></tr>
-      <tr><td>닉네임 보관</td><td>커스텀 <code>UGameInstance</code>에 캐시</td></tr>
-    </tbody>
-  </table>
-  </div>
+  <h2>로비 / 세션(방) 시스템</h2>
 
   <h3>레벨 흐름</h3>
-  <pre><code>[Login] --로그인 성공(GetMe)--> [Lobby (standalone): 프로필 + 방만들기 + RoomList]
+  <pre><code>[Login] --로그인 성공(GetMe)--> [Lobby: 프로필 + 방만들기 + RoomList + NPC 채팅]
   방 만들기 → CreateSession(max 4) → ServerTravel("Room?listen")
   방 참가   → JoinSession → ClientTravel → [Room (listen server)]
-[Room] LobbyGameMode/PC/PlayerState → 접속자 닉네임 목록 / 나가기 → Lobby 복귀</code></pre>
+[Room] 닉네임 목록 + 준비/시작 → 전원 준비 시 ServerTravel("InGame?listen")
+[InGame] ThirdPerson 이동 + 필드 NPC 대화 (F 키)</code></pre>
 
-  <h3>추가/수정 클래스</h3>
+  <h3>클래스</h3>
   <div class="table-wrap">
   <table>
     <thead><tr><th>클래스</th><th>역할</th></tr></thead>
@@ -243,302 +173,151 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
       <tr><td><code>UUEClientGameInstance</code></td><td>로그인 닉네임 캐시 (레벨 이동해도 유지)</td></tr>
       <tr><td><code>UGameSessionSubsystem</code></td><td>세션 래핑: <code>HostRoom</code>/<code>FindRooms</code>/<code>JoinRoomById</code>/<code>LeaveRoom</code>, <code>FRoomInfo</code>, 완료 델리게이트</td></tr>
       <tr><td><code>ALobbyGameMode</code></td><td>Room 맵 게임모드 (폰 없음, PC/PS 지정)</td></tr>
-      <tr><td><code>ALobbyPlayerController</code></td><td>로컬 닉네임을 <code>ServerSetNickname</code> RPC로 서버 전달</td></tr>
-      <tr><td><code>ALobbyPlayerState</code></td><td>복제되는 <code>Nickname</code></td></tr>
-      <tr><td><code>ULobbyWidget</code></td><td>프로필 + 방만들기 + RoomList(병합)</td></tr>
+      <tr><td><code>ALobbyPlayerController</code></td><td>위젯 표시(<code>LobbyWidgetClass</code>) + 커서 + <code>FInputModeUIOnly</code>, <code>ServerSetNickname</code>/<code>ServerSetReady</code>/<code>ServerRequestStartGame</code> RPC</td></tr>
+      <tr><td><code>ALobbyPlayerState</code></td><td>복제되는 <code>Nickname</code>, <code>bIsReady</code></td></tr>
+      <tr><td><code>ULobbyWidget</code></td><td>프로필 + 방만들기 + RoomList(동기화) + 우측 NPC 채팅 패널</td></tr>
       <tr><td><code>URoomListEntryWidget</code></td><td>방 한 줄 (꽉 차면 Join 비활성)</td></tr>
-      <tr><td><code>URoomWidget</code></td><td>방 안 닉네임 목록 + 나가기</td></tr>
-      <tr><td><code>ULoginUserWidget</code> (수정)</td><td>로그인 성공 → <code>GetMe</code> → 닉네임 캐시 → <code>OpenLevel(Lobby)</code></td></tr>
+      <tr><td><code>URoomWidget</code></td><td>닉네임/준비 상태 목록 + 준비(클라)/시작(호스트)/나가기</td></tr>
     </tbody>
   </table>
   </div>
 
   <h3>주요 동작</h3>
   <ul>
-    <li>방 세션: <code>NumPublicConnections=4</code>, <code>bIsLANMatch=true</code>, 커스텀 설정 <code>ROOMNAME</code>/<code>HOSTNAME</code> 저장</li>
-    <li>RoomList: <code>RoomId</code> 기준 <strong>병합</strong> — 새 방 추가·기존 방 갱신·<strong>검색에서 빠진 방은 제거하지 않음</strong> <em>(→ 5차에서 제거 방식으로 변경)</em></li>
-    <li>꽉 찬 방(<code>CurrentPlayers ≥ MaxPlayers</code>)은 Join 버튼 비활성</li>
-    <li>방 안 닉네임: 클라 <code>BeginPlay</code>→<code>ServerSetNickname</code> RPC→<code>PlayerState</code> 복제, 위젯은 <code>GameState-&gt;PlayerArray</code>를 0.5초 타이머로 갱신</li>
+    <li>방 세션: <code>NumPublicConnections=4</code>, <code>bIsLANMatch=true</code>, 커스텀 설정 <code>ROOMNAME</code>/<code>HOSTNAME</code></li>
+    <li>RoomList: <code>RoomId</code> 기준 동기화 — 새 방 추가·기존 갱신·<strong>최신 검색에 없는 방 제거</strong></li>
+    <li>OSS 는 <code>Online::GetSubsystem(GetWorld())</code> 로 <strong>World 기반 조회</strong> — PIE 다중창에서 인스턴스별 세션 분리
+        (전역 <code>IOnlineSubsystem::Get()</code> 은 광고/검색 충돌 + 유령 세션 원인이었음), 검색 진행 중 재요청 가드</li>
+    <li>준비/시작: 클라 준비 토글 → <code>bIsReady</code> 복제, 호스트는 자신 제외 전원 준비 시 시작 가능(혼자면 즉시)</li>
+    <li>방 안 닉네임: <code>ServerSetNickname</code> RPC → PlayerState 복제, 위젯이 0.5초 타이머로 <code>PlayerArray</code> 갱신</li>
   </ul>
 
-  <h3>설정 변경</h3>
+  <h3>설정</h3>
   <ul>
-    <li><code>Build.cs</code>: <code>OnlineSubsystem</code>, <code>OnlineSubsystemUtils</code> 추가</li>
-    <li><code>.uproject</code>: <code>OnlineSubsystemNull</code>, <code>OnlineSubsystemUtils</code> 플러그인 활성화</li>
-    <li><code>DefaultEngine.ini</code>: <code>GameInstanceClass</code> 지정, <code>[OnlineSubsystem] DefaultPlatformService=Null</code></li>
+    <li><code>Build.cs</code>: <code>OnlineSubsystem</code>, <code>OnlineSubsystemUtils</code>, <code>EnhancedInput</code>, <code>InputCore</code>, <code>HTTP</code>, <code>Json</code> 등</li>
+    <li><code>.uproject</code>: <code>OnlineSubsystemNull</code>, <code>OnlineSubsystemUtils</code>, <code>PythonScriptPlugin</code> 활성화</li>
+    <li><code>DefaultEngine.ini</code>: <code>GameInstanceClass</code>, <code>[OnlineSubsystem] DefaultPlatformService=Null</code></li>
   </ul>
 
-  <h3>블루프린트/에디터 연동</h3>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>WBP</th><th>부모</th><th>배치할 위젯 (이름 정확히)</th></tr></thead>
-    <tbody>
-      <tr><td><code>WBP_Lobby</code></td><td><code>LobbyWidget</code></td><td><code>NicknameText</code>, <code>RoomNameInput</code>, <code>CreateRoomButton</code>, <code>RefreshButton</code>, <code>RoomListBox</code></td></tr>
-      <tr><td><code>WBP_RoomEntry</code></td><td><code>RoomListEntryWidget</code></td><td><code>RoomNameText</code>, <code>HostNameText</code>, <code>CountText</code>, <code>JoinButton</code></td></tr>
-      <tr><td><code>WBP_Room</code></td><td><code>RoomWidget</code></td><td><code>PlayerListBox</code>, <code>LeaveButton</code></td></tr>
-    </tbody>
-  </table>
-  </div>
+  <h2>UI 에셋 파이프라인 (ULobbyAssetGenerator)</h2>
+  <p>UE 5.7 Python 에서는 <code>WidgetBlueprint.WidgetTree</code>/<code>RootWidget</code> 이 protected 라 순수 Python 으로
+     위젯 트리 구성이 불가 → <strong>에디터 전용 C++ 도구</strong>(<code>WITH_EDITOR</code>)를 만들어 Python 커맨드릿에서 호출한다.</p>
   <ul>
-    <li><code>WBP_Lobby</code> → Class Defaults → Session → <code>Room Entry Widget Class</code> = <code>WBP_RoomEntry</code></li>
-    <li><code>Room</code> 맵 → World Settings → <code>GameMode Override</code> = <code>LobbyGameMode</code></li>
-    <li>Lobby/Room 맵 Level Blueprint(BeginPlay)에서 각 위젯 Create + Add to Viewport</li>
+    <li><code>GenerateLobbyAssets()</code> — WBP_RoomEntry(Border 루트) / WBP_Room(준비·시작·나가기) / WBP_Lobby(2컬럼: 로비 + 채팅 슬롯)</li>
+    <li><code>GenerateRoomWiring()</code> — BP_RoomPC(WBP_Room) / BP_RoomGM</li>
+    <li><code>GenerateNpcChatAssets()</code> — WBP_NpcChat + WBP_Lobby CDO 배선</li>
+    <li><code>GenerateInGameAssets()</code> — IA/IMC_Interact, WBP_InGameChat, WBP_InteractPrompt, BP_InGamePC, BP_InGameGM</li>
+    <li>기존 에셋은 위젯 트리 <strong>in-place 재구성</strong>(UClass 유지 → 외부 참조 보존), 멱등 실행 가능</li>
+    <li>CDO 기본값은 리플렉션(<code>FClassProperty</code>/<code>FObjectProperty</code>)으로 설정</li>
+    <li>전 화면 위젯은 1920×1080 기준 풀스크린 앵커(0,0→1,1) 레이아웃</li>
+    <li>InGame 맵 복제/NPC 배치/GameMode Override 는 Python 드라이버가 수행</li>
   </ul>
 
-  <h2>4차 작업: Lobby/Room UI 에셋 파이프라인 및 PIE 표시 버그 수정</h2>
-  <p>Lobby/Room 화면에 필요한 블루프린트·위젯 에셋을 <strong>C++ 에디터 도구로 자동 생성</strong>하고,
-     위젯이 화면에 나오지 않던 문제들을 해결했다.</p>
+  <h2>NPC 채팅 — 로컬 LLM (llama.cpp + Gemma)</h2>
 
-  <h3>위젯 표시 방식 변경 (Level BP → PlayerController)</h3>
+  <h3>통신 (UNpcChatSubsystem)</h3>
   <ul>
-    <li><code>ALobbyPlayerController</code>에 <code>LobbyWidgetClass</code>(TSubclassOf&lt;UUserWidget&gt;, EditAnywhere) 추가</li>
-    <li><code>BeginPlay</code>(로컬 컨트롤러)에서 위젯 생성 + <code>AddToViewport</code> + 마우스 커서 표시 + <strong><code>FInputModeUIOnly</code></strong></li>
-    <li>리슨서버 호스트/클라이언트 모두 각자의 로컬 컨트롤러에서 실행 → 3차의 "Level Blueprint에서 Create + Add to Viewport" 방식을 대체</li>
-  </ul>
-
-  <h3>LobbyAssetGenerator (에디터 전용 C++ 도구)</h3>
-  <ul>
-    <li>UE 5.7 Python에서는 <code>WidgetBlueprint.WidgetTree</code>/<code>RootWidget</code>이 protected라 순수 Python으로 위젯 트리 구성 불가
-        → <code>ULobbyAssetGenerator</code>(BlueprintFunctionLibrary, <code>WITH_EDITOR</code>)를 만들어 <strong>Python 커맨드릿에서 호출</strong></li>
-    <li>기존 에셋이 있으면 위젯 트리를 <strong>in-place 재구성</strong> (UClass 유지 → CDO/맵의 외부 참조 보존), 멱등 실행 가능</li>
-    <li><code>Build.cs</code>: <code>bBuildEditor</code>일 때 <code>UnrealEd</code>/<code>UMGEditor</code>/<code>AssetTools</code> 추가, <code>.uproject</code>에 <code>PythonScriptPlugin</code> 활성화</li>
-  </ul>
-
-  <h3>생성된 에셋</h3>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>에셋</th><th>내용</th></tr></thead>
-    <tbody>
-      <tr><td><code>Content/Lobby/Widget/WBP_Lobby</code></td><td>로비 UI — 제목/닉네임/방 이름 입력/방 만들기/새로고침/방 리스트(ScrollBox)</td></tr>
-      <tr><td><code>Content/Lobby/Widget/WBP_RoomEntry</code></td><td>방 리스트 한 줄 — <strong>Border 루트</strong> (방 이름/호스트/인원/참가)</td></tr>
-      <tr><td><code>Content/Lobby/Widget/WBP_Room</code></td><td>방 UI — 제목/참가자 목록/나가기</td></tr>
-      <tr><td><code>Content/Lobby/BP_LobbyPC</code> / <code>BP_RoomPC</code></td><td><code>LobbyPlayerController</code> 상속, <code>LobbyWidgetClass</code>=WBP_Lobby / WBP_Room</td></tr>
-      <tr><td><code>Content/Lobby/BP_RoomGM</code></td><td><code>LobbyGameMode</code> 상속, PC=BP_RoomPC</td></tr>
-      <tr><td><code>Content/Maps/Room.umap</code></td><td>Lobby 복제 + World Settings GameMode Override=BP_RoomGM</td></tr>
-    </tbody>
-  </table>
-  </div>
-  <ul>
-    <li>전 위젯 1920×1080 기준 <strong>풀스크린 앵커(0,0→1,1) 레이아웃</strong> (해상도에 맞춰 스트레치)</li>
-    <li>Lobby 맵은 GameMode Override=<code>BP_LobbyGM</code>(PC=BP_LobbyPC, 사용자 구성)</li>
-  </ul>
-
-  <h3>해결한 버그 3건</h3>
-  <ol>
-    <li><strong>WBP_Lobby를 바인딩해도 화면에 안 보임</strong> — 위젯 내용이 비어 있었음(콘텐츠/크기 0) → 전체 UI 레이아웃 구성으로 해결</li>
-    <li><strong>방 만들기 → 로그인 화면 등장</strong> — <code>/Game/Maps/Room</code> 맵이 없어 <code>ServerTravel</code> 실패 → <code>GameDefaultMap</code>(Login)으로 폴백된 것. Room 맵 + BP_RoomGM 생성으로 해결</li>
-    <li><strong>방 리스트 항목이 안 보임</strong> — <code>WBP_RoomEntry</code> 루트가 CanvasPanel이라 ScrollBox 안에서 desired size 0 → <strong>Border 루트</strong>로 교체해 해결</li>
-  </ol>
-  <p>검증: <code>-game -windowed</code> 실행 스크린샷으로 Lobby UI / Room UI / 방 리스트 렌더링 확인.</p>
-
-  <h2>5차 작업: Ubuntu 실서버 연동 + 멀티 인스턴스 안정화</h2>
-
-  <h3>서버 주소 변경</h3>
-  <p>계정 서버(FastAPI + MySQL)를 <strong>Ubuntu 머신으로 이전</strong> → <code>BaseUrl</code> 기본값을
-     <code>http://192.168.0.106:8088</code>로 변경.</p>
-
-  <h3>실서버 엔드투엔드 검증 (실제 게임 클라이언트 실행)</h3>
-  <pre><code>[Account] 성공 (HTTP 201) 회원가입 성공 | id=2 email=claudetest01@test.com nick=클로드테스터
-[Account] 성공 (HTTP 200) 로그인 성공
-[Account] 성공 (HTTP 200) 내 정보 조회 성공 | id=2 ...</code></pre>
-  <ul>
-    <li>한글 닉네임 UTF-8 저장/조회 정상, JWT Bearer 토큰 발급→저장→<code>/auth/me</code> 인증 체인 확인</li>
-    <li>최초 500 오류의 원인은 서버 DB <code>users</code> 테이블에 <code>deleted_at</code> 컬럼 누락 →
-        <code>ALTER TABLE users ADD COLUMN deleted_at DATETIME NULL</code> (서버 측 조치)로 해결</li>
-  </ul>
-
-  <h3>버그 수정 3건</h3>
-  <ol>
-    <li><strong>PIE 2창(리슨서버) 종료 시 크래시</strong> — GameInstance 2개가 같은 이름의 콘솔 명령(<code>Account.*</code>)을 중복 등록
-        → 콘솔 매니저가 같은 오브젝트를 공유시켜 종료 시 <strong>이중 해제</strong>(access violation).
-        <code>FindConsoleObject</code> 가드로 첫 인스턴스만 등록하도록 수정 (<code>AccountSubsystem.cpp</code>)</li>
-    <li><strong>다른 클라이언트에서 새로고침해도 방 리스트 안 뜸</strong> — <code>IOnlineSubsystem::Get()</code>이 프로세스 전역 인스턴스를
-        반환해 PIE 다중창이 OSS를 공유 → LAN 비콘 광고/검색 충돌(<code>Ignoring game search request while one is pending</code>).
-        <code>Online::GetSubsystem(GetWorld())</code>로 <strong>인스턴스별 OSS</strong> 사용 + 검색 진행 중(<code>InProgress</code>) 재요청 가드 추가 (<code>GameSessionSubsystem.cpp</code>)</li>
-    <li><strong>사라진 방이 리스트에 계속 남음</strong> — ① 위 전역 OSS 공유 때문에 PIE 종료 후에도 에디터 프로세스에 유령 세션이
-        남아 광고됐던 문제는 2번 수정으로 해소(이제 PIE 종료 시 세션도 소멸),
-        ② 위젯 병합 로직을 <strong>동기화 방식으로 변경</strong>: 최신 검색 결과에 없는 방은 리스트에서 제거 (<code>LobbyWidget.cpp</code>)</li>
-  </ol>
-  <p>검증: 빌드 성공 + 게임 실행 콘솔 명령 회귀 테스트(로그인/내 정보 정상),
-     PIE 리슨서버 2창에서 방 생성 → 새로고침 → 리스트 표시 → 참가 → 종료(크래시 없음) 정상 동작 확인.</p>
-
-  <h2>6차 작업: NPC 채팅 시스템 (로컬 LLM: llama.cpp + Gemma)</h2>
-  <p>로비 레벨에서 플레이어가 NPC "세라"와 채팅하는 시스템. LLM 백엔드는 로컬
-     llama.cpp 서버(<code>http://127.0.0.1:8080</code>, 모델 <code>gemma-4-E2B-it-Q8_0</code>)의
-     <strong>OpenAI 호환 <code>/v1/chat/completions</code></strong> 를 사용한다.</p>
-
-  <h3>확정 설계</h3>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>항목</th><th>결정</th></tr></thead>
-    <tbody>
-      <tr><td>NPC</td><td>기본 1명 — "세라" (밝고 친절한 로비 안내원)</td></tr>
-      <tr><td>초상화</td><td>아트 에셋 없음 → 성격 색상 Border + 이니셜 플레이스홀더</td></tr>
-      <tr><td>대화 기억</td><td>단발 질문-답변 (히스토리 미포함)</td></tr>
-      <tr><td>배치</td><td>로비 우측 세로 패널 (우상단 초상화+이름 / 대화 로그 / 하단 입력+전송)</td></tr>
-    </tbody>
-  </table>
-  </div>
-
-  <h3>UNpcChatSubsystem (UGameInstanceSubsystem, 신규)</h3>
-  <ul>
-    <li><strong><code>FNpcProfile</code> 구조체</strong>: <code>Name</code> / <code>Personality</code>(성격 지침) / <code>StatusLine</code>(상태 정보) / <code>PortraitColor</code></li>
-    <li><strong>요청 페이로드 조립</strong> (<code>BuildRequestBody</code>): system 메시지 =
+    <li><code>FNpcProfile</code> 구조체: <code>Name</code> / <code>Personality</code>(성격 지침) / <code>StatusLine</code>(상태) / <code>PortraitColor</code></li>
+    <li><strong>페이로드 조립</strong>: system 메시지 =
         <code>"당신은 '{이름}'입니다. {성격}\n현재 상태: {상태}\n답변은 한국어로 2~3문장 이내로 짧게 하세요."</code>
-        + user 메시지, <code>max_tokens 1024</code> / <code>temperature 0.7</code></li>
-    <li><strong>비동기 + 델리게이트</strong>: HTTP 완료 시 <code>OnChatResponseReceived(bool, NpcName, Message)</code>
-        (BlueprintAssignable) 브로드캐스트. 연결 실패/비2xx/빈 응답은 bSuccess=false + 에러 설명</li>
-    <li>진행 중 요청 가드(<code>bRequestInFlight</code>), <code>SetLlmBaseUrl</code></li>
-    <li>콘솔 명령: <code>Npc.Chat &lt;message&gt;</code> / <code>Npc.SetLlmUrl &lt;url&gt;</code> (중복 등록 가드 포함)</li>
+        + user 메시지 → <code>POST /v1/chat/completions</code> (<code>max_tokens 1024</code>, <code>temperature 0.7</code>)</li>
+    <li><strong>비동기 + 델리게이트</strong>: 완료 시 <code>OnChatResponseReceived(bool, NpcName, Message)</code> 브로드캐스트</li>
+    <li>타임아웃 180초(<code>SetTimeout</code> + <code>SetActivityTimeout</code>) — 로컬 LLM 은 생성 완료까지 무응답이므로 둘 다 필요</li>
+    <li>진행 중 요청 가드, 콘솔 명령 <code>Npc.Chat &lt;msg&gt;</code> / <code>Npc.SetLlmUrl &lt;url&gt;</code></li>
+    <li>Gemma thinking 모델: content 가 비면 실패 처리 (서버를 <code>--reasoning-budget 0</code> 으로 실행 권장)</li>
   </ul>
 
-  <h3>UNpcChatWidget (신규) + 에셋</h3>
+  <h3>로비 NPC "세라"</h3>
   <ul>
-    <li>BindWidget: <code>PortraitBorder</code>/<code>NpcInitialText</code>(초상화), <code>NpcNameText</code>, <code>ChatLogBox</code>(ScrollBox), <code>ChatInput</code>, <code>SendButton</code></li>
-    <li>전송(버튼/Enter) → "나: ..." 추가 + 버튼 비활성 + "세라: ..." 대기 표시 → 응답으로 교체 + 자동 스크롤</li>
-    <li><code>NpcProfile</code> 기본값은 세라 (BP Class Defaults 에서 이름/성격/상태/색 변경 가능)</li>
-    <li><code>ULobbyWidget</code>: 우측 <code>ChatPanelSlot</code>(BindWidgetOptional) + <code>NpcChatWidgetClass</code> → NativeConstruct 에서 채팅 위젯 삽입</li>
-    <li><code>LobbyAssetGenerator::GenerateNpcChatAssets()</code>: <strong>WBP_NpcChat</strong> 생성 +
-        <strong>WBP_Lobby 2컬럼 재구성</strong>(왼쪽 로비 fill + 오른쪽 채팅 고정폭 420px) + CDO 배선</li>
+    <li><code>UNpcChatWidget</code>: 초상화(색+이니셜)/이름, 대화 로그(ScrollBox), 입력+전송(Enter), 대기 "..." → 응답 교체</li>
+    <li>WBP_Lobby 우측 고정폭 패널(<code>ChatPanelSlot</code>)에 삽입, 우상단 = 초상화+이름</li>
   </ul>
 
-  <h3>해결한 이슈 2건</h3>
-  <ol>
-    <li><strong><code>localhost</code> 연결 실패</strong> — UE HTTP 가 <code>localhost</code>를 IPv6(<code>::1</code>)로 해석하는데
-        llama.cpp 는 IPv4만 리슨 → 기본 URL 을 <code>http://127.0.0.1:8080</code> 으로 변경</li>
-    <li><strong>60초 타임아웃</strong> — Gemma(thinking 모델)가 생성에 ~46초+ 소요, UE 무활동(activity) 타임아웃도 존재
-        → <code>SetTimeout(180)</code> + <code>SetActivityTimeout(180)</code></li>
-  </ol>
+  <h2>InGame 레벨 + 필드 NPC 대화</h2>
 
-  <h3>검증</h3>
-  <ul>
-    <li>빌드 성공, 에셋 생성 커맨드릿 멱등 2회 실행 확인</li>
-    <li><strong>E2E 성공</strong>: 게임 클라이언트 <code>Npc.Chat</code> → Gemma 실응답 수신</li>
-  </ul>
-  <pre><code>[NpcChat] 성공 (세라) 안녕하세요! 만나서 정말 반가워요! 😊 오늘 기분도 너무 좋아서
-신나는데요, 어떤 방을 만들거나 참가하고 싶으신가요? 제가 신나게 도와드릴게요!</code></pre>
-  <ul>
-    <li>스크린샷: 좌상단 "로비 (Lobby)" / 우상단 세라 초상화+이름 / 우측 채팅 패널 렌더링 확인</li>
-    <li>참고: 응답 지연은 thinking 때문 — 서버를 <code>--reasoning-budget 0</code> 으로 실행하면 단축됨</li>
-  </ul>
-
-  <h2>7차 작업: InGame 레벨 + 준비/시작 플로우 + 필드 NPC 대화</h2>
-  <p>방에서 준비/시작을 거쳐 전원이 <strong>InGame 레벨</strong>로 이동, ThirdPerson 캐릭터로 돌아다니며
-     필드 NPC 에게 접근해 <strong>F 키로 LLM 채팅</strong>하는 기능. 사용자가 추가한 에셋
-     (CityFolks 캐릭터 팩, ThirdPerson 템플릿, EnhancedInput Content/Input) 활용.</p>
-
-  <h3>확정 설계</h3>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>항목</th><th>결정</th></tr></thead>
-    <tbody>
-      <tr><td>NPC</td><td>2명 — 도우 센세이(요리 사부) + 데포르티스타(운동선수), 인스턴스별 프로필</td></tr>
-      <tr><td>시작 조건</td><td>호스트 제외 전원 준비 시 시작 가능 (혼자면 즉시 가능)</td></tr>
-      <tr><td>채팅 닫기</td><td>입력창 포커스 없을 때 F + ESC 항상 (한글 ㄹ=F키 오작동 방지)</td></tr>
-      <tr><td>InGame 맵</td><td>Lvl_ThirdPerson 복제(<code>Maps/InGame/InGame.umap</code>) + 바닥 ×4 + NPC 배치</td></tr>
-    </tbody>
-  </table>
-  </div>
-
-  <h3>준비/시작 플로우 (Room)</h3>
-  <ul>
-    <li><code>ALobbyPlayerState.bIsReady</code> 복제 추가, <code>ALobbyPlayerController</code> 에 <code>ServerSetReady</code> / <code>ServerRequestStartGame</code> RPC</li>
-    <li><code>URoomWidget</code>: 클라 전용 <strong>준비</strong> 토글 / 호스트 전용 <strong>시작</strong> 버튼(전원 준비 시 활성), 목록에 <code>[준비완료]</code> 표시</li>
-    <li>시작 → <code>ServerTravel("/Game/Maps/InGame/InGame?listen")</code> 로 방 전원 동반 이동</li>
-  </ul>
-
-  <h3>InGame 구성 (신규 C++ 4종 + 에셋)</h3>
+  <h3>구성</h3>
   <div class="table-wrap">
   <table>
     <thead><tr><th>클래스/에셋</th><th>역할</th></tr></thead>
     <tbody>
       <tr><td><code>AInGameGameMode</code> + <code>BP_InGameGM</code></td><td>Pawn=BP_ThirdPersonCharacter, PC=BP_InGamePC, PlayerState=LobbyPlayerState(닉네임 유지)</td></tr>
-      <tr><td><code>AInGamePlayerController</code> + <code>BP_InGamePC</code></td><td>F(IA_Interact) 바인딩, 프롬프트/채팅 토글, 채팅 중 IMC 제거로 이동·점프·시점 차단</td></tr>
-      <tr><td><code>ANpcActor</code></td><td>스켈레탈 메시 + 반경 250 거리 체크(0.25s) → 프롬프트 표시. <code>FNpcProfile</code>/IdleAnim 인스턴스별 설정</td></tr>
-      <tr><td><code>UInGameChatWidget</code> + <code>WBP_InGameChat</code></td><td>하단 도킹 검정 반투명(0.65) 채팅 바 — ESC 로 닫기 요청, NPC 프로필 주입</td></tr>
+      <tr><td><code>AInGamePlayerController</code> + <code>BP_InGamePC</code></td><td>F(IA_Interact, EnhancedInput) 바인딩, 프롬프트/채팅 토글, 채팅 중 IMC 제거로 이동·점프·시점 차단</td></tr>
+      <tr><td><code>ANpcActor</code></td><td>스켈레탈 메시 + 반경 250 거리 체크(0.25초) → "[F] 대화 시작" 프롬프트. 인스턴스별 <code>FNpcProfile</code>/<code>IdleAnim</code></td></tr>
+      <tr><td><code>UInGameChatWidget</code> + <code>WBP_InGameChat</code></td><td>하단 도킹 검정 반투명(0.65) 채팅 바 — ESC 닫기, NPC 프로필 주입</td></tr>
       <tr><td><code>WBP_InteractPrompt</code></td><td>"[F] 대화 시작" 하단 중앙 프롬프트</td></tr>
-      <tr><td><code>IA_Interact</code> / <code>IMC_Interact</code></td><td>EnhancedInput F 키 (Content/Input, 기존 IMC_Default 는 무변경)</td></tr>
+      <tr><td><code>Maps/InGame/InGame.umap</code></td><td>Lvl_ThirdPerson 복제 + 바닥 ×4 + NPC 2명 배치</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>배치된 NPC (CityFolks 팩)</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>NPC</th><th>메시</th><th>애니메이션</th><th>성격</th></tr></thead>
+    <tbody>
+      <tr><td>도우 센세이</td><td>SK_DoughSensei</td><td><code>MM_Idle</code></td><td>느긋하고 지혜로운 요리 사부 (존댓말)</td></tr>
+      <tr><td>데포르티스타</td><td>SK_Deportista</td><td><code>MM_Walk_InPlace</code></td><td>열정 넘치는 운동선수 (활기찬 말투)</td></tr>
     </tbody>
   </table>
   </div>
   <ul>
-    <li>LLM 통신은 6차의 <code>NpcChatSubsystem</code> 그대로 재사용 (NPC별 성격 프롬프트만 교체)</li>
-    <li><code>Build.cs</code>: <code>EnhancedInput</code>, <code>InputCore</code> 추가</li>
+    <li>CityFolks 팩은 SK 메시·SKM_Manny·데모 애니 전체가 <code>SKEL_DoughSensei</code> 스켈레톤을 공유 → 리타게팅 없이 재생</li>
+    <li>채팅 닫기: 입력창 포커스 없을 때 F + ESC 항상 (한글 키보드에서 ㄹ=F키라 입력 중 F 감지는 오작동 위험)</li>
+    <li>LLM 통신은 <code>NpcChatSubsystem</code> 재사용 (NPC별 성격 프롬프트만 교체)</li>
   </ul>
 
-  <h3>해결한 이슈 4건</h3>
-  <ol>
-    <li><strong>BP CDO 배선이 디스크에 저장 안 됨</strong> — <code>save_dirty_packages</code> 로는 리플렉션 CDO 수정이 저장되지 않음
-        → <code>save_directory(only_if_is_dirty=False)</code> 강제 저장 + 별도 프로세스로 디스크 재검증</li>
-    <li><strong><code>MapKey()</code> 가 저장에 반영 안 됨</strong> — C++/Python 모두 호출 직후에도 mappings 0개
-        → Python 에서 <code>mappings</code> 프로퍼티를 직접 설정</li>
-    <li><strong>프롬프트가 안 뜸</strong> — 폰 스폰 시 초기 오버랩이 빙의(possess) 전에 발생해 이벤트 유실
-        → 오버랩 대신 저빈도(0.25초) 거리 체크로 교체</li>
-    <li><strong>채팅 패널 높이 40px</strong> — 비스트레치 Y 앵커에서는 <code>Offsets.Bottom</code> 이 여백이 아니라 <strong>높이</strong> → 320 으로 수정</li>
-  </ol>
-
-  <h3>검증</h3>
-  <ul>
-    <li>빌드 성공, 커맨드릿 멱등 재실행 + 별도 프로세스 디스크 검증 통과</li>
-    <li>스크린샷: InGame(ThirdPerson 캐릭터 + NPC 2명 + "[F] 대화 시작" 프롬프트) /
-        <strong>F 키 이벤트 주입 → 하단 채팅 UI 열림</strong>(도우 센세이 헤더 + 인사말 + 입력창) / Room(시작·나가기 호스트 뷰)</li>
-    <li>PIE 2창 수동 E2E: 준비 → 시작 → InGame 동반 이동 → NPC 접근 → F 채팅 → 닫기 후 이동 재개 (사용자 확인)</li>
-    <li><strong>NPC 애니메이션 적용 (NPC별 차별화)</strong>: CityFolks 팩은 전체(SK 메시·SKM_Manny·데모 애니)가 <code>SKEL_DoughSensei</code>
-        스켈레톤 하나를 공유하는 것으로 확인 → 리타게팅 없이 맵 인스턴스 <code>IdleAnim</code> 지정만으로 루프 재생
-      <ul>
-        <li>도우 센세이: <code>MM_Idle</code> (느긋한 대기) — 스크린샷 확인</li>
-        <li>데포르티스타: <code>MM_Walk_InPlace</code> (제자리 걷기, 운동선수 컨셉) — 사용자 확인</li>
-      </ul>
-    </li>
-  </ul>
+  <h2>해결한 주요 이슈</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>이슈</th><th>원인 → 해결</th></tr></thead>
+    <tbody>
+      <tr><td>방 만들기 → 로그인 화면 등장</td><td>Room 맵 부재로 <code>ServerTravel</code> 실패 → <code>GameDefaultMap</code> 폴백. Room 맵 생성</td></tr>
+      <tr><td>방 리스트 항목이 안 보임</td><td>엔트리 루트 CanvasPanel 은 ScrollBox 안에서 desired size 0 → Border 루트로 교체</td></tr>
+      <tr><td>PIE 2창 종료 크래시</td><td>콘솔 명령 중복 등록 → 이중 해제. 첫 인스턴스만 등록하는 가드</td></tr>
+      <tr><td>다른 클라에서 방 안 보임 / 유령 방</td><td>전역 OSS 공유 → World 기반 OSS 조회 + 검색 가드 + 리스트 동기화(사라진 방 제거)</td></tr>
+      <tr><td>서버 500 (회원가입/로그인)</td><td>DB <code>users.deleted_at</code> 컬럼 누락 → <code>ALTER TABLE</code> (서버 측)</td></tr>
+      <tr><td><code>localhost</code> LLM 연결 실패</td><td>UE HTTP 가 IPv6(::1)로 해석, llama.cpp 는 IPv4만 리슨 → <code>127.0.0.1</code> 사용</td></tr>
+      <tr><td>LLM 60초 타임아웃</td><td>생성 완료까지 무응답 + UE 무활동 타임아웃 → <code>SetTimeout/SetActivityTimeout 180</code></td></tr>
+      <tr><td>BP CDO 배선이 저장 안 됨</td><td>커맨드릿 <code>save_dirty_packages</code> 로는 리플렉션 CDO 수정 누락 → <code>save_directory(only_if_is_dirty=False)</code> 강제 저장 + 별도 프로세스 재검증</td></tr>
+      <tr><td>IMC <code>MapKey()</code> 미반영</td><td>C++/Python 모두 저장에 반영 안 됨 → <code>mappings</code> 프로퍼티 직접 설정</td></tr>
+      <tr><td>NPC 프롬프트 미표시</td><td>폰 스폰 시 초기 오버랩이 빙의 전 발생해 유실 → 저빈도 거리 체크로 교체</td></tr>
+      <tr><td>채팅 패널 높이 40px</td><td>비스트레치 Y 앵커에서 <code>Offsets.Bottom</code> = 여백이 아니라 높이 → 320 지정</td></tr>
+    </tbody>
+  </table>
+  </div>
 
   <h2>검증 상태</h2>
   <ul>
-    <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
-      <ul>
-        <li>1차: 계정 통신 모듈 컴파일 → <code>UnrealEditor-UEClient_20260715.dll</code> 생성 확인</li>
-        <li>최초 <code>BuildSettingsVersion.V5</code> → 설치 엔진(V6)과 빌드 환경 충돌 → <strong>V6로 수정</strong> 후 성공</li>
-        <li>2차: 로그인/가입 위젯 클래스 3종 컴파일·링크 성공</li>
-        <li>3차: Lobby/세션 클래스 8종 + OnlineSubsystem 모듈 추가 후 <strong>전체 재빌드 성공</strong> (신규 UClass·플러그인이라 Live Coding 불가 → 에디터 종료 후 빌드)</li>
-        <li>4~5차: LobbyAssetGenerator·세션/콘솔 수정 포함 빌드 성공</li>
-      </ul>
-    </li>
-    <li><span class="ok">✅ 실서버 계정 API 검증 완료 (5차)</span> — Ubuntu 서버 상대로 실제 게임 클라이언트에서 회원가입 201 / 로그인 200 / 내 정보 200 확인</li>
-    <li><span class="ok">✅ Lobby/세션 방 검증 완료 (4~5차)</span> — 스크린샷으로 UI 렌더링 확인, PIE 리슨서버 2창에서 방 생성/검색/참가/종료 정상 동작 (사용자 확인)</li>
-    <li><span class="ok">✅ NPC 채팅 검증 완료 (6차)</span> — 게임 클라이언트 → 로컬 Gemma 실통신으로 성격 반영 응답 수신, 로비 UI 스크린샷 확인</li>
-    <li><span class="ok">✅ InGame/준비·시작 검증 완료 (7차)</span> — 스크린샷(캐릭터/NPC/프롬프트/F 채팅 UI/Room 버튼) + PIE 2창 수동 E2E (사용자 확인)</li>
+    <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code></li>
+    <li><span class="ok">✅ 실서버 계정 API</span> — Ubuntu 서버 상대로 실제 게임 클라이언트에서 회원가입 201 / 로그인 200 / 내 정보 200, 한글 닉네임·JWT 인증 체인 확인</li>
+    <li><span class="ok">✅ 로비/세션 방</span> — 스크린샷으로 UI 렌더링 확인, PIE 리슨서버 2창에서 방 생성/검색/참가/종료 정상 (사용자 확인)</li>
+    <li><span class="ok">✅ 로비 NPC 채팅</span> — 게임 클라이언트 → 로컬 Gemma 실통신으로 성격 반영 응답 수신</li>
+    <li><span class="ok">✅ InGame/준비·시작</span> — 스크린샷(캐릭터/NPC/프롬프트/F 채팅 UI/Room 버튼) + PIE 2창 수동 E2E (사용자 확인)</li>
+    <li><span class="ok">✅ NPC 애니메이션</span> — 도우 센세이 <code>MM_Idle</code>(스크린샷), 데포르티스타 <code>MM_Walk_InPlace</code>(사용자 확인)</li>
   </ul>
 
   <h2>엔드투엔드 테스트 방법</h2>
-  <pre><code># 1) 서버 기동 (Ubuntu ~/VibeCoding, MySQL game_account DB 켜진 상태)
+  <pre><code># 1) 계정 서버 기동 (Ubuntu ~/VibeCoding, MySQL game_account DB 켜진 상태)
 uvicorn app.main:app --host 0.0.0.0 --port 8088
 
-# 2) UE 에디터에서 UEClient_20260715.uproject 열기 (재빌드 프롬프트 수락)
+# 2) LLM 서버 기동 (같은 PC): llama.cpp llama-server + Gemma, 포트 8080 (--reasoning-budget 0 권장)
 
-# 3) Play(PIE) 후 콘솔(백틱 ` 키)에서 순서대로:
-Account.Register test@a.com 홍길동 password123
-Account.Login test@a.com password123
-Account.Me
-Account.Withdraw
-Account.Login test@a.com password123      # 탈퇴 후 → 401 기대</code></pre>
-  <p>기대 동작: 가입 201 → 중복 409 → 로그인 → 내 정보 → 탈퇴 204 → 재로그인 401.
-     결과는 Output Log 창에 <code>[Account] ...</code>로 출력.</p>
-
-  <h3>Lobby / 세션 테스트</h3>
+# 3) 에디터 Play 설정: Number of Players = 2, Net Mode = Play As Listen Server</code></pre>
   <ol>
-    <li>서버 기동 후, Editor Play 모드 = <strong>Standalone</strong>, Number of Players = <strong>2</strong>
-        (PIE 다중창은 GameInstance 공유로 닉네임 이슈 → Standalone 권장)</li>
-    <li>각 인스턴스에서 서로 다른 계정으로 로그인 → 자동으로 Lobby 진입, 프로필에 닉네임 표시</li>
-    <li>한쪽에서 방 이름 입력 후 방 만들기 → Room 맵으로 이동(리슨 호스트)</li>
-    <li>다른쪽에서 새로고침 → RoomList에 방 표시(호스트/인원) → 참가 → Room에서 서로 닉네임 확인</li>
-    <li>인원 4/4인 방은 Join 버튼 비활성 확인, 새로고침 시 사라진 방이 목록에서 제거되는지 확인</li>
+    <li>각 창에서 로그인 → Lobby (우측 세라와 채팅 가능)</li>
+    <li>호스트 창: 방 이름 입력 → 방 만들기 / 클라 창: 새로고침 → 참가</li>
+    <li>Room: 클라 준비 → 호스트 시작 → 전원 InGame 이동</li>
+    <li>InGame: WASD 이동 → NPC 접근 → "[F] 대화 시작" → F → 입력창 클릭 후 질문 → 응답(수십 초) → ESC 또는 (포커스 해제 후) F 로 닫기 → 이동 재개</li>
   </ol>
+  <p>콘솔 명령 검증: <code>`</code> 키 → <code>Account.Login ...</code>, <code>Npc.Chat 안녕하세요</code> → Output Log 의 <code>[Account]</code> / <code>[NpcChat]</code></p>
+  <p>참고: LLM 주소가 <code>127.0.0.1</code> 이므로 다른 PC 클라이언트는 LLM 접근 불가 (같은 PC 다중 실행은 정상). 필요 시 <code>Npc.SetLlmUrl</code> 로 변경.</p>
 
   <h2>남은/추후 작업 <span class="badge">범위 밖</span></h2>
   <ul>
-    <li>실제 게임플레이(Room 이후), 방장 위임, 방 비밀번호</li>
+    <li>실제 게임플레이(InGame 콘텐츠), 방장 위임, 방 비밀번호</li>
     <li>인터넷 매치메이킹(Steam/EOS)</li>
     <li>토큰 디스크 영속화(자동 로그인), refresh 토큰</li>
+    <li>NPC 대화 히스토리(멀티턴), InGame → 로비 복귀 UI</li>
   </ul>
 </main>
 </body>
