@@ -106,7 +106,7 @@
       <tr><td>아키텍처</td><td><code>UGameInstanceSubsystem</code> 단일 클래스 (A안)</td></tr>
       <tr><td>호출 방식</td><td><code>BlueprintCallable</code> 함수 + 콘솔 명령어 (둘 다)</td></tr>
       <tr><td>토큰 보관</td><td>JWT 메모리 보관 (재시작 시 소멸)</td></tr>
-      <tr><td>서버 주소</td><td>기본 <code>http://127.0.0.1:8000</code> (<code>SetBaseUrl</code>로 변경)</td></tr>
+      <tr><td>서버 주소</td><td>기본 <code>http://192.168.0.106:8088</code> — Ubuntu 서버, 5차에서 변경 (<code>SetBaseUrl</code>로 변경 가능)</td></tr>
     </tbody>
   </table>
   </div>
@@ -256,7 +256,7 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
   <h3>주요 동작</h3>
   <ul>
     <li>방 세션: <code>NumPublicConnections=4</code>, <code>bIsLANMatch=true</code>, 커스텀 설정 <code>ROOMNAME</code>/<code>HOSTNAME</code> 저장</li>
-    <li>RoomList: <code>RoomId</code> 기준 <strong>병합</strong> — 새 방 추가·기존 방 갱신·<strong>검색에서 빠진 방은 제거하지 않음</strong>(요청 동작)</li>
+    <li>RoomList: <code>RoomId</code> 기준 <strong>병합</strong> — 새 방 추가·기존 방 갱신·<strong>검색에서 빠진 방은 제거하지 않음</strong> <em>(→ 5차에서 제거 방식으로 변경)</em></li>
     <li>꽉 찬 방(<code>CurrentPlayers ≥ MaxPlayers</code>)은 Join 버튼 비활성</li>
     <li>방 안 닉네임: 클라 <code>BeginPlay</code>→<code>ServerSetNickname</code> RPC→<code>PlayerState</code> 복제, 위젯은 <code>GameState-&gt;PlayerArray</code>를 0.5초 타이머로 갱신</li>
   </ul>
@@ -285,6 +285,83 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
     <li>Lobby/Room 맵 Level Blueprint(BeginPlay)에서 각 위젯 Create + Add to Viewport</li>
   </ul>
 
+  <h2>4차 작업: Lobby/Room UI 에셋 파이프라인 및 PIE 표시 버그 수정</h2>
+  <p>Lobby/Room 화면에 필요한 블루프린트·위젯 에셋을 <strong>C++ 에디터 도구로 자동 생성</strong>하고,
+     위젯이 화면에 나오지 않던 문제들을 해결했다.</p>
+
+  <h3>위젯 표시 방식 변경 (Level BP → PlayerController)</h3>
+  <ul>
+    <li><code>ALobbyPlayerController</code>에 <code>LobbyWidgetClass</code>(TSubclassOf&lt;UUserWidget&gt;, EditAnywhere) 추가</li>
+    <li><code>BeginPlay</code>(로컬 컨트롤러)에서 위젯 생성 + <code>AddToViewport</code> + 마우스 커서 표시 + <strong><code>FInputModeUIOnly</code></strong></li>
+    <li>리슨서버 호스트/클라이언트 모두 각자의 로컬 컨트롤러에서 실행 → 3차의 "Level Blueprint에서 Create + Add to Viewport" 방식을 대체</li>
+  </ul>
+
+  <h3>LobbyAssetGenerator (에디터 전용 C++ 도구)</h3>
+  <ul>
+    <li>UE 5.7 Python에서는 <code>WidgetBlueprint.WidgetTree</code>/<code>RootWidget</code>이 protected라 순수 Python으로 위젯 트리 구성 불가
+        → <code>ULobbyAssetGenerator</code>(BlueprintFunctionLibrary, <code>WITH_EDITOR</code>)를 만들어 <strong>Python 커맨드릿에서 호출</strong></li>
+    <li>기존 에셋이 있으면 위젯 트리를 <strong>in-place 재구성</strong> (UClass 유지 → CDO/맵의 외부 참조 보존), 멱등 실행 가능</li>
+    <li><code>Build.cs</code>: <code>bBuildEditor</code>일 때 <code>UnrealEd</code>/<code>UMGEditor</code>/<code>AssetTools</code> 추가, <code>.uproject</code>에 <code>PythonScriptPlugin</code> 활성화</li>
+  </ul>
+
+  <h3>생성된 에셋</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>에셋</th><th>내용</th></tr></thead>
+    <tbody>
+      <tr><td><code>Content/Lobby/Widget/WBP_Lobby</code></td><td>로비 UI — 제목/닉네임/방 이름 입력/방 만들기/새로고침/방 리스트(ScrollBox)</td></tr>
+      <tr><td><code>Content/Lobby/Widget/WBP_RoomEntry</code></td><td>방 리스트 한 줄 — <strong>Border 루트</strong> (방 이름/호스트/인원/참가)</td></tr>
+      <tr><td><code>Content/Lobby/Widget/WBP_Room</code></td><td>방 UI — 제목/참가자 목록/나가기</td></tr>
+      <tr><td><code>Content/Lobby/BP_LobbyPC</code> / <code>BP_RoomPC</code></td><td><code>LobbyPlayerController</code> 상속, <code>LobbyWidgetClass</code>=WBP_Lobby / WBP_Room</td></tr>
+      <tr><td><code>Content/Lobby/BP_RoomGM</code></td><td><code>LobbyGameMode</code> 상속, PC=BP_RoomPC</td></tr>
+      <tr><td><code>Content/Maps/Room.umap</code></td><td>Lobby 복제 + World Settings GameMode Override=BP_RoomGM</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul>
+    <li>전 위젯 1920×1080 기준 <strong>풀스크린 앵커(0,0→1,1) 레이아웃</strong> (해상도에 맞춰 스트레치)</li>
+    <li>Lobby 맵은 GameMode Override=<code>BP_LobbyGM</code>(PC=BP_LobbyPC, 사용자 구성)</li>
+  </ul>
+
+  <h3>해결한 버그 3건</h3>
+  <ol>
+    <li><strong>WBP_Lobby를 바인딩해도 화면에 안 보임</strong> — 위젯 내용이 비어 있었음(콘텐츠/크기 0) → 전체 UI 레이아웃 구성으로 해결</li>
+    <li><strong>방 만들기 → 로그인 화면 등장</strong> — <code>/Game/Maps/Room</code> 맵이 없어 <code>ServerTravel</code> 실패 → <code>GameDefaultMap</code>(Login)으로 폴백된 것. Room 맵 + BP_RoomGM 생성으로 해결</li>
+    <li><strong>방 리스트 항목이 안 보임</strong> — <code>WBP_RoomEntry</code> 루트가 CanvasPanel이라 ScrollBox 안에서 desired size 0 → <strong>Border 루트</strong>로 교체해 해결</li>
+  </ol>
+  <p>검증: <code>-game -windowed</code> 실행 스크린샷으로 Lobby UI / Room UI / 방 리스트 렌더링 확인.</p>
+
+  <h2>5차 작업: Ubuntu 실서버 연동 + 멀티 인스턴스 안정화</h2>
+
+  <h3>서버 주소 변경</h3>
+  <p>계정 서버(FastAPI + MySQL)를 <strong>Ubuntu 머신으로 이전</strong> → <code>BaseUrl</code> 기본값을
+     <code>http://192.168.0.106:8088</code>로 변경.</p>
+
+  <h3>실서버 엔드투엔드 검증 (실제 게임 클라이언트 실행)</h3>
+  <pre><code>[Account] 성공 (HTTP 201) 회원가입 성공 | id=2 email=claudetest01@test.com nick=클로드테스터
+[Account] 성공 (HTTP 200) 로그인 성공
+[Account] 성공 (HTTP 200) 내 정보 조회 성공 | id=2 ...</code></pre>
+  <ul>
+    <li>한글 닉네임 UTF-8 저장/조회 정상, JWT Bearer 토큰 발급→저장→<code>/auth/me</code> 인증 체인 확인</li>
+    <li>최초 500 오류의 원인은 서버 DB <code>users</code> 테이블에 <code>deleted_at</code> 컬럼 누락 →
+        <code>ALTER TABLE users ADD COLUMN deleted_at DATETIME NULL</code> (서버 측 조치)로 해결</li>
+  </ul>
+
+  <h3>버그 수정 3건</h3>
+  <ol>
+    <li><strong>PIE 2창(리슨서버) 종료 시 크래시</strong> — GameInstance 2개가 같은 이름의 콘솔 명령(<code>Account.*</code>)을 중복 등록
+        → 콘솔 매니저가 같은 오브젝트를 공유시켜 종료 시 <strong>이중 해제</strong>(access violation).
+        <code>FindConsoleObject</code> 가드로 첫 인스턴스만 등록하도록 수정 (<code>AccountSubsystem.cpp</code>)</li>
+    <li><strong>다른 클라이언트에서 새로고침해도 방 리스트 안 뜸</strong> — <code>IOnlineSubsystem::Get()</code>이 프로세스 전역 인스턴스를
+        반환해 PIE 다중창이 OSS를 공유 → LAN 비콘 광고/검색 충돌(<code>Ignoring game search request while one is pending</code>).
+        <code>Online::GetSubsystem(GetWorld())</code>로 <strong>인스턴스별 OSS</strong> 사용 + 검색 진행 중(<code>InProgress</code>) 재요청 가드 추가 (<code>GameSessionSubsystem.cpp</code>)</li>
+    <li><strong>사라진 방이 리스트에 계속 남음</strong> — ① 위 전역 OSS 공유 때문에 PIE 종료 후에도 에디터 프로세스에 유령 세션이
+        남아 광고됐던 문제는 2번 수정으로 해소(이제 PIE 종료 시 세션도 소멸),
+        ② 위젯 병합 로직을 <strong>동기화 방식으로 변경</strong>: 최신 검색 결과에 없는 방은 리스트에서 제거 (<code>LobbyWidget.cpp</code>)</li>
+  </ol>
+  <p>검증: 빌드 성공 + 게임 실행 콘솔 명령 회귀 테스트(로그인/내 정보 정상),
+     PIE 리슨서버 2창에서 방 생성 → 새로고침 → 리스트 표시 → 참가 → 종료(크래시 없음) 정상 동작 확인.</p>
+
   <h2>검증 상태</h2>
   <ul>
     <li><span class="ok">✅ 컴파일·링크 성공</span> — <code>Build.bat UEClient_20260715Editor Win64 Development</code>
@@ -293,14 +370,16 @@ docs/superpowers/specs/2026-07-15-ue5-account-client-design.md   # 설계 문서
         <li>최초 <code>BuildSettingsVersion.V5</code> → 설치 엔진(V6)과 빌드 환경 충돌 → <strong>V6로 수정</strong> 후 성공</li>
         <li>2차: 로그인/가입 위젯 클래스 3종 컴파일·링크 성공</li>
         <li>3차: Lobby/세션 클래스 8종 + OnlineSubsystem 모듈 추가 후 <strong>전체 재빌드 성공</strong> (신규 UClass·플러그인이라 Live Coding 불가 → 에디터 종료 후 빌드)</li>
+        <li>4~5차: LobbyAssetGenerator·세션/콘솔 수정 포함 빌드 성공</li>
       </ul>
     </li>
-    <li><span class="pending">⏳ 엔드투엔드(실서버 통신 / BP 위젯 클릭 / 세션 방)는 미실행</span> — 에디터 GUI + 서버 기동 필요. 아래 절차로 확인.</li>
+    <li><span class="ok">✅ 실서버 계정 API 검증 완료 (5차)</span> — Ubuntu 서버 상대로 실제 게임 클라이언트에서 회원가입 201 / 로그인 200 / 내 정보 200 확인</li>
+    <li><span class="ok">✅ Lobby/세션 방 검증 완료 (4~5차)</span> — 스크린샷으로 UI 렌더링 확인, PIE 리슨서버 2창에서 방 생성/검색/참가/종료 정상 동작 (사용자 확인)</li>
   </ul>
 
   <h2>엔드투엔드 테스트 방법</h2>
-  <pre><code># 1) 서버 기동 (C:/work/VibeCoding, MySQL game_account DB 켜진 상태)
-uvicorn app.main:app --reload
+  <pre><code># 1) 서버 기동 (Ubuntu ~/VibeCoding, MySQL game_account DB 켜진 상태)
+uvicorn app.main:app --host 0.0.0.0 --port 8088
 
 # 2) UE 에디터에서 UEClient_20260715.uproject 열기 (재빌드 프롬프트 수락)
 
@@ -320,7 +399,7 @@ Account.Login test@a.com password123      # 탈퇴 후 → 401 기대</code></pr
     <li>각 인스턴스에서 서로 다른 계정으로 로그인 → 자동으로 Lobby 진입, 프로필에 닉네임 표시</li>
     <li>한쪽에서 방 이름 입력 후 방 만들기 → Room 맵으로 이동(리슨 호스트)</li>
     <li>다른쪽에서 새로고침 → RoomList에 방 표시(호스트/인원) → 참가 → Room에서 서로 닉네임 확인</li>
-    <li>인원 4/4인 방은 Join 버튼 비활성 확인, 새로고침 시 목록이 갱신되되 기존 항목이 사라지지 않는지 확인</li>
+    <li>인원 4/4인 방은 Join 버튼 비활성 확인, 새로고침 시 사라진 방이 목록에서 제거되는지 확인</li>
   </ol>
 
   <h2>남은/추후 작업 <span class="badge">범위 밖</span></h2>
@@ -328,7 +407,6 @@ Account.Login test@a.com password123      # 탈퇴 후 → 401 기대</code></pr
     <li>실제 게임플레이(Room 이후), 방장 위임, 방 비밀번호</li>
     <li>인터넷 매치메이킹(Steam/EOS)</li>
     <li>토큰 디스크 영속화(자동 로그인), refresh 토큰</li>
-    <li>엔드투엔드 실서버 통신 + 세션 방 검증 (위 절차대로 수동 실행)</li>
   </ul>
 </main>
 </body>

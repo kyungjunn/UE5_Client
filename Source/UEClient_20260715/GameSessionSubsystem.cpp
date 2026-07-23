@@ -2,6 +2,7 @@
 
 #include "UEClientGameInstance.h"
 #include "OnlineSubsystem.h"
+#include "OnlineSubsystemUtils.h"
 #include "OnlineSessionSettings.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
@@ -27,7 +28,10 @@ void UGameSessionSubsystem::Deinitialize()
 
 IOnlineSessionPtr UGameSessionSubsystem::GetSessionInterface() const
 {
-	if (IOnlineSubsystem* OSS = IOnlineSubsystem::Get())
+	// IOnlineSubsystem::Get() 은 항상 기본 인스턴스를 돌려주므로, 한 프로세스에서
+	// PIE 창을 여러 개 띄우면(리슨서버 + 클라이언트) 모든 인스턴스가 OSS 를 공유해
+	// 세션 광고/검색이 서로 충돌한다. World 기반 조회로 인스턴스별 OSS 를 얻는다.
+	if (IOnlineSubsystem* OSS = Online::GetSubsystem(GetWorld()))
 	{
 		return OSS->GetSessionInterface();
 	}
@@ -102,6 +106,14 @@ void UGameSessionSubsystem::FindRooms()
 	if (!Session.IsValid())
 	{
 		OnFindRoomsComplete.Broadcast(TArray<FRoomInfo>());
+		return;
+	}
+
+	// 이전 검색이 아직 진행 중이면 무시. (OSS 는 진행 중 재요청을 "Ignoring game search
+	// request while one is pending" 경고와 함께 버리는데, 여기서 SearchSettings 까지
+	// 새로 교체해 버리면 진행 중이던 검색 결과가 유실된다.)
+	if (SearchSettings.IsValid() && SearchSettings->SearchState == EOnlineAsyncTaskState::InProgress)
+	{
 		return;
 	}
 

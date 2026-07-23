@@ -93,9 +93,11 @@ void ULobbyWidget::HandleFindRoomsComplete(const TArray<FRoomInfo>& Rooms)
 		return;
 	}
 
-	// RoomId 기준 병합: 새 방은 추가, 기존 방은 갱신, 사라진 방은 유지.
+	// RoomId 기준 동기화: 새 방은 추가, 기존 방은 갱신, 검색 결과에 없는 방은 제거.
+	TSet<FString> SeenRoomIds;
 	for (const FRoomInfo& Room : Rooms)
 	{
+		SeenRoomIds.Add(Room.RoomId);
 		if (URoomListEntryWidget** Found = EntryMap.Find(Room.RoomId))
 		{
 			(*Found)->Setup(Room);
@@ -109,6 +111,15 @@ void ULobbyWidget::HandleFindRoomsComplete(const TArray<FRoomInfo>& Rooms)
 				RoomListBox->AddChild(Entry);
 				EntryMap.Add(Room.RoomId, Entry);
 			}
+		}
+	}
+
+	for (auto It = EntryMap.CreateIterator(); It; ++It)
+	{
+		if (!SeenRoomIds.Contains(It.Key()))
+		{
+			It.Value()->RemoveFromParent();
+			It.RemoveCurrent();
 		}
 	}
 }

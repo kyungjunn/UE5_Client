@@ -285,6 +285,16 @@ void UAccountSubsystem::LogUser(bool bSuccess, int32 StatusCode, const FString& 
 void UAccountSubsystem::RegisterConsoleCommands()
 {
 	IConsoleManager& CM = IConsoleManager::Get();
+
+	// PIE 다중 인스턴스(리슨서버 + 클라이언트) 실행 시 GameInstance 가 여러 개 생겨
+	// 같은 이름의 콘솔 명령을 중복 등록하게 된다. 이 경우 콘솔 매니저가 기존 오브젝트를
+	// 공유시키므로, 종료 시 양쪽 Deinitialize 가 같은 포인터를 이중 해제하며 크래시한다.
+	// → 이미 등록돼 있으면(다른 인스턴스가 먼저 등록) 등록을 건너뛴다.
+	if (CM.FindConsoleObject(TEXT("Account.Register")))
+	{
+		return;
+	}
+
 	TWeakObjectPtr<UAccountSubsystem> WeakThis(this);
 
 	ConsoleCommands.Add(CM.RegisterConsoleCommand(

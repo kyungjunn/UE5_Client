@@ -61,7 +61,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Account")
 	void Withdraw();
 
-	/** 서버 주소 변경 (기본값: http://127.0.0.1:8000) */
+	/** 서버 주소 변경 (기본값: http://192.168.0.106:8088) */
 	UFUNCTION(BlueprintCallable, Category = "Account")
 	void SetBaseUrl(const FString& Url);
 
@@ -102,7 +102,7 @@ private:
 	UFUNCTION()
 	void LogUser(bool bSuccess, int32 StatusCode, const FString& Message, const FAccountUser& User);
 
-	FString BaseUrl = TEXT("http://127.0.0.1:8000");
+	FString BaseUrl = TEXT("http://192.168.0.106:8088");
 	FString AuthToken;
 
 	TArray<IConsoleObject*> ConsoleCommands;
