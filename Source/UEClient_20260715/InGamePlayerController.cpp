@@ -31,6 +31,11 @@ void AInGamePlayerController::BeginPlay()
 		}
 	}
 
+	// 템플릿에서 이동/시점 컨텍스트(IMC_Default 등)는 BP_ThirdPersonPlayerController 가
+	// 추가하는데, 이 레벨은 PC 를 BP_InGamePC 로 교체했으므로 여기서 직접 추가해야
+	// 시작 직후부터 이동·마우스 회전이 동작한다.
+	SetMovementInputEnabled(true);
+
 	if (PromptWidgetClass)
 	{
 		PromptWidget = CreateWidget<UUserWidget>(this, PromptWidgetClass);
